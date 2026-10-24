@@ -32,6 +32,7 @@ type Props = {
   midiOn: boolean;
   toggleLearn: () => void;
   quality: { value: number; set: (q: number) => void };
+  cursor: { mode: number; amount: number; set: (c: Partial<{ mode: number; amount: number }>) => void };
   mod: { on: boolean; toggle: () => void; selected: string | null; select: (t: string) => void; set: (t: string, m: Mod | null) => void };
   auto: { mode: AutoMode; setMode: (m: AutoMode) => void; bars: number; setBars: (b: number) => void; bpm: number; locked: boolean; tap: () => void; unlock: () => void };
   text: { st: CaptionState; set: (p: Partial<CaptionState>) => void; lyricCount: number; onLyrics: () => void; clearLyrics: () => void };
@@ -138,6 +139,17 @@ export function Panel(p: Props) {
             ))}
           </div>
           {g(GLOBALS.find((d) => d.key === "lens")!)}
+        </div>
+
+        <div className="sec">
+          <div className="sec-h"><span>Cursor</span></div>
+          <div className="seg">
+            {["off", "flow", "swirl", "ripple", "light"].map((m, i) => (
+              <button key={m} className={p.cursor.mode === i ? "on" : ""} onClick={() => p.cursor.set({ mode: i })}>{m}</button>
+            ))}
+          </div>
+          {p.cursor.mode > 0 && <Slider label="strength" value={p.cursor.amount * 100} def={60} onChange={(v) => p.cursor.set({ amount: v / 100 })} />}
+          <div className="hint">{["The pointer leaves the picture alone.", "Drag the picture along as you move and leave a glowing trail.", "Whirl the picture around the pointer.", "A lens and ripples follow the pointer.", "A soft light follows the pointer and paints into the trails."][p.cursor.mode]} Click anywhere for a shockwave. Exports ignore the pointer.</div>
         </div>
 
         <div className="sec">

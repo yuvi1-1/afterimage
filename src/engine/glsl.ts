@@ -57,6 +57,8 @@ uniform sampler2D uScene, uPrevAcc, uEmblem;
 uniform vec2 uRes;
 uniform float uTrails, uChaos, uBass, uKick, uTime, uEmblemOn, uEmblemSize, uEmblemOpacity, uEmblemPulse, uEmblemSpin, uEmblemAspect, uEmblemWhite, uEmblemInvert;
 uniform vec3 uPal[5];
+uniform vec2 uMouseP, uMouseV;
+uniform float uMouseAct, uCurMode, uCurAmt;
 out vec4 fragColor;
 ${HELPERS}
 vec4 emblem(vec2 p){
@@ -82,6 +84,15 @@ void main(){
   fc *= 1. - (.002 + uBass*.014 + uChaos*.012);
   fc = rot(uChaos*.012*sin(uTime*.31))*fc;
   fc += (vec2(fbm3(fc*3. + uTime*.4), fbm3(fc*3. - uTime*.37 + 7.)) - .5)*.012*uChaos;
+  // cursor: drag or whirl the picture's history around the pointer
+  if(uCurMode > .5 && uMouseAct > .001){
+    vec2 m = (uMouseP - .5)*vec2(A, 1.);
+    vec2 dm = fc - m; float dd = length(dm);
+    float fall = exp(-dd*dd/(.012 + uCurAmt*.05));
+    if(uCurMode < 1.5) fc -= uMouseV*vec2(A, 1.)*.03*fall*uCurAmt*1.6;
+    else if(uCurMode < 2.5) fc = m + rot(uMouseAct*fall*uCurAmt*.5)*dm;
+    if(uCurMode < 1.5 || uCurMode > 3.5) cur += mix(uPal[3], uPal[4], .25)*exp(-dd*dd/.002)*uMouseAct*.35*uCurAmt;
+  }
   vec3 prev = texture(uPrevAcc, fc/vec2(A, 1.) + .5).rgb;
   float t = uTrails*.95;
   vec3 col = mix(cur, prev, t);
@@ -95,6 +106,9 @@ precision highp float;
 uniform sampler2D uAcc, uEmblem, uCap;
 uniform vec2 uRes;
 uniform float uCapOn, uCapAlpha, uCapPulse, uCapTint;
+uniform vec2 uMouseP;
+uniform float uMouseAct, uCurMode, uCurAmt;
+uniform vec3 uClick; // x, y, seconds since the click
 uniform float uTime, uBass, uMid, uHigh, uKick, uAccent, uHeat, uBright, uExposure, uHue, uVig, uChaos;
 uniform float uSym, uTiles, uTwist, uSlice, uSpin, uLens, uLensStyle;
 uniform float uEmblemOn, uEmblemClean, uEmblemSize, uEmblemOpacity, uEmblemPulse, uEmblemSpin, uEmblemAspect, uEmblemWhite, uEmblemInvert;
@@ -143,6 +157,20 @@ void main(){
       q = id/n + c/n*(1. - L*.75); shade = 1. - dot(c, c)*.9*L;
     }
   }
+  // cursor lens and click shockwave
+  vec2 mp = (uMouseP - .5)*vec2(A, 1.);
+  float wave = 0.;
+  if(uCurMode > 2.5 && uCurMode < 3.5){
+    vec2 d = q - mp; float r = length(d) + 1e-5;
+    q += d/r*sin(r*48. - uTime*9.)*.018*exp(-r*5.)*uMouseAct*uCurAmt*2.;
+    q = mp + d*(1. - .32*exp(-r*r*35.)*uCurAmt*(.4 + uMouseAct));
+  }
+  if(uCurMode > .5 && uClick.z < 2.5){
+    vec2 d = q - (uClick.xy - .5)*vec2(A, 1.); float r = length(d) + 1e-5;
+    float rad = uClick.z*1.1;
+    wave = exp(-abs(r - rad)*45.)*exp(-uClick.z*1.8)*uCurAmt;
+    q -= d/r*wave*.035;
+  }
   q += (vec2(fbm3(q*2.5 + uTime*.15), fbm3(q*2.5 - uTime*.15 + 4.)) - .5)*uChaos*.05;
   vec2 suv = mirror(q/vec2(A, 1.) + .5);
   vec3 c;
@@ -157,6 +185,8 @@ void main(){
   vec3 g = textureLod(uAcc, suv, 2.5).rgb*.4 + textureLod(uAcc, suv, 4.5).rgb*.6;
   c += g*g*uHeat*(1.4 + uBass*1.2);
   c += uKick*uHeat*.08*uPal[4];
+  if(uCurMode > 3.5) c += mix(uPal[3], uPal[4], .6)*exp(-length(p - mp)*9.)*(.12 + uMouseAct*.6)*uCurAmt;
+  c += uPal[4]*wave*.35;
   c *= uExposure*uBright;
   c = hueRot(c, uHue);
   float v = smoothstep(1.3, .2, length((uv - .5)*vec2(A*.9, 1.)));

@@ -58,7 +58,14 @@ export class Engine {
   spinAngle = 0;
   exposure = 1;
   fps = 60;
-  mouse = [0, 0, 0];
+  mouse = [0.5, 0.5, 0];
+  /** Cursor interaction: 0 off, 1 flow, 2 swirl, 3 ripple, 4 light; amount 0..1 */
+  cursor = { mode: 1, amount: 0.6 };
+  private mPrev = [0.5, 0.5];
+  private mVel = [0, 0];
+  private mAct = 0;
+  private mDown = 0;
+  private click = [0.5, 0.5, 99];
   error: string | null = null;
   onError: ((e: string) => void) | null = null;
   private frameCount = 0;
@@ -309,6 +316,7 @@ export class Engine {
     this.time += dt;
     this.sceneTime += dt * speed * (1 + b.level * this.react * 0.5);
     this.hue += dt * (this.cur.hueDrift / 100) * 0.9;
+    this.trackCursor(dt);
     this.spinAngle += dt * (this.cur.spin / 100) * 0.8;
     // textures
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
@@ -356,6 +364,7 @@ export class Engine {
     gl.uniform1f(f.u.uTime, this.time);
     this.emblemUniforms(f, this.emblem.on && !this.emblem.clean);
     gl.uniform3fv(f.u.uPal, this.palCur.flat());
+    this.cursorUniforms(f, true);
     this.draw();
     gl.bindTexture(gl.TEXTURE_2D, acc.write.tex);
     gl.generateMipmap(gl.TEXTURE_2D);
@@ -407,6 +416,7 @@ export class Engine {
     gl.uniform1f(F.u.uCapAlpha, this.caption.alpha);
     gl.uniform1f(F.u.uCapPulse, this.caption.pulse);
     gl.uniform1f(F.u.uCapTint, this.caption.tint);
+    this.cursorUniforms(F, false);
     gl.uniform3fv(F.u.uPal, this.palCur.flat());
     this.draw();
     if (this.grab) { const g = this.grab; this.grab = null; g(this.canvas); }
@@ -424,6 +434,32 @@ export class Engine {
         if (this.renderScale > this.maxScale) { this.renderScale = this.maxScale; this.resize(true); }
       }
     }
+  }
+
+  /** Pointer speed and activity drive the cursor effects; they fade out when the pointer rests. */
+  private trackCursor(dt: number) {
+    const [mx, my, down] = this.mouse;
+    const d = Math.max(dt, 1e-3);
+    const vx = (mx - this.mPrev[0]) / d, vy = (my - this.mPrev[1]) / d;
+    this.mPrev = [mx, my];
+    const k = 1 - Math.exp(-dt * 14);
+    this.mVel[0] += (Math.max(-6, Math.min(6, vx)) - this.mVel[0]) * k;
+    this.mVel[1] += (Math.max(-6, Math.min(6, vy)) - this.mVel[1]) * k;
+    const speed = Math.hypot(this.mVel[0], this.mVel[1]);
+    this.mAct = Math.max(this.mAct * Math.exp(-dt * 1.4), Math.min(1, speed * 0.9), down ? 0.6 : 0);
+    if (down && !this.mDown) this.click = [mx, my, 0];
+    this.mDown = down;
+    this.click[2] += dt;
+  }
+
+  private cursorUniforms(p: Program, feedback: boolean) {
+    const gl = this.gl, u = p.u, on = this.cursor.mode > 0 && !this.offline;
+    gl.uniform2f(u.uMouseP, this.mouse[0], this.mouse[1]);
+    gl.uniform1f(u.uMouseAct, on ? this.mAct : 0);
+    gl.uniform1f(u.uCurMode, on ? this.cursor.mode : 0);
+    gl.uniform1f(u.uCurAmt, this.cursor.amount);
+    if (feedback) gl.uniform2f(u.uMouseV, this.mVel[0], this.mVel[1]);
+    else gl.uniform3f(u.uClick, this.click[0], this.click[1], on ? this.click[2] : 99);
   }
 
   /** Audio modulation: each modulated control moves with its source on top of its set value. */

@@ -271,6 +271,9 @@ export default function App() {
     try { await navigator.clipboard.writeText(url); toast({ text: "Link to this look copied. Anyone who opens it sees exactly this." }); }
     catch { toast({ text: url, ms: 15000 }); }
   }, [toast]);
+  const [cursor, setCursorState] = useState<{ mode: number; amount: number }>(() => { try { return { mode: 1, amount: 0.6, ...JSON.parse(localStorage.getItem("afterimage.cursor") || "{}") }; } catch { return { mode: 1, amount: 0.6 }; } });
+  const setCursor = useCallback((c: Partial<{ mode: number; amount: number }>) => setCursorState((o) => { const n = { ...o, ...c }; try { localStorage.setItem("afterimage.cursor", JSON.stringify(n)); } catch { /* ignore */ } return n; }), []);
+  useEffect(() => { const e = engineRef.current; if (e) e.cursor = { ...cursor }; }, [cursor]);
   const [quality, setQualityState] = useState<number>(() => { try { return +(localStorage.getItem("afterimage.quality") || 1); } catch { return 1; } });
   const setQuality = useCallback((q: number) => { setQualityState(q); try { localStorage.setItem("afterimage.quality", String(q)); } catch { /* ignore */ } }, []);
   useEffect(() => { const e = engineRef.current; if (e) { e.maxScale = quality; if (e.renderScale > quality) { e.renderScale = quality; e.resize(true); } } }, [quality]);
@@ -807,8 +810,8 @@ export default function App() {
   const stagePointer = (e: React.PointerEvent) => {
     const eng = engineRef.current;
     if (!eng) return;
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    eng.mouse = [(e.clientX - r.left) / r.width, 1 - (e.clientY - r.top) / r.height, e.buttons ? 1 : 0];
+    const r = (canvasRef.current ?? (e.currentTarget as HTMLElement)).getBoundingClientRect();
+    eng.mouse = [Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)), Math.max(0, Math.min(1, 1 - (e.clientY - r.top) / r.height)), e.buttons ? 1 : 0];
   };
 
   // debug overlay
@@ -916,6 +919,7 @@ export default function App() {
         laneCount={Object.keys(lanes).length}
         midiOn={learn} toggleLearn={toggleLearn}
         quality={{ value: quality, set: setQuality }}
+        cursor={{ ...cursor, set: setCursor }}
         mod={{ on: modOn, toggle: () => { setModOn((v) => !v); setModSel(null); }, selected: modSel, select: setModSel, set: setMod }}
         auto={{ mode: autoMode, setMode: setAutoMode, bars: autoBars, setBars: setAutoBars, bpm: tempo.bpm, locked: tempo.locked, tap, unlock: unlockTempo }}
         text={{ st: cap, set: (q) => setCap((c) => ({ ...c, ...q })), lyricCount: lyrics.length, onLyrics: () => lrcInput.current?.click(), clearLyrics: () => setLyrics([]) }}
