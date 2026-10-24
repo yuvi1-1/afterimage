@@ -2,14 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AudioEngine, type SourceKind } from "./engine/audio";
 import { Engine, type Emblem } from "./engine/engine";
 import { PALETTES, paletteFromImage } from "./engine/palettes";
-import { GLOBALS, type GlobalKey, type Look } from "./engine/params";
+import { GLOBALS, type GlobalKey, type Look, type Mod } from "./engine/params";
 import { loadLanes, sample, saveLanes, writePoint, type LaneSet } from "./lib/lanes";
 import { clearLicense, storedLicense, storeLicense, verifyLicense, type License } from "./lib/license";
 import { cloneLook, FACTORY, freshLook, loadPresets, mixLooks, randomizeLook, randomScene, savePresets, type Preset } from "./lib/looks";
 import { analyseImage, cropTo, isAudio, isImage, isVideo, loadImage, waveformPeaks, type ImageResult } from "./lib/media";
 import { Midi } from "./lib/midi";
 import { download, Recorder, stamp, type RecordOpts } from "./lib/recorder";
+import { Autopilot, TapTempo, type AutoMode } from "./lib/autopilot";
 import { Captions, loadCaptionPrefs, saveCaptionPrefs, type CaptionState } from "./lib/captions";
+import { decodeLook, lookFromHash, shareLink } from "./lib/share";
 import { parseLrc, readTags, type LyricLine } from "./lib/tags";
 import { exportSupported, exportVideo, pickSaveTarget, type ExportProgress } from "./lib/exporter";
 import { decodeAudio } from "./engine/offline";
@@ -250,6 +252,28 @@ export default function App() {
     }, 250);
     return () => clearInterval(t);
   }, [preview, pro, pushLook, gatePro]);
+
+  // a shared look link (#look=…) opens straight into that look
+  useEffect(() => {
+    const code = lookFromHash();
+    if (!code) return;
+    decodeLook(code).then((l) => {
+      window.history.replaceState(null, "", location.pathname + location.search);
+      if (!l || !SCENES.some((s) => s.id === l.scene)) return toast({ text: "That look link couldn't be read." });
+      const next = { ...freshLook(), ...l } as Look;
+      if (sceneById(next.scene).pro && !pro) setPreview({ until: Date.now() + PREVIEW_MS, back: cloneLook(lookRef.current) });
+      pushLook(next, { history: true });
+      toast({ text: `Opened a shared look · ${sceneById(next.scene).name}` });
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const copyShareLink = useCallback(async () => {
+    const url = await shareLink(lookRef.current);
+    try { await navigator.clipboard.writeText(url); toast({ text: "Link to this look copied. Anyone who opens it sees exactly this." }); }
+    catch { toast({ text: url, ms: 15000 }); }
+  }, [toast]);
+  const [quality, setQualityState] = useState<number>(() => { try { return +(localStorage.getItem("afterimage.quality") || 1); } catch { return 1; } });
+  const setQuality = useCallback((q: number) => { setQualityState(q); try { localStorage.setItem("afterimage.quality", String(q)); } catch { /* ignore */ } }, []);
+  useEffect(() => { const e = engineRef.current; if (e) { e.maxScale = quality; if (e.renderScale > quality) { e.renderScale = quality; e.resize(true); } } }, [quality]);
 
   const stepScene = useCallback((d: number) => {
     const i = SCENES.findIndex((s) => s.id === lookRef.current.scene);
@@ -584,6 +608,63 @@ export default function App() {
     download(blob, `afterimage-${sceneById(lookRef.current.scene).id}-${stamp()}.${ext}`);
     toast({ text: `Saved ${(blob.size / 1e6).toFixed(1)} MB ${ext.toUpperCase()}` });
   }, [toast]);
+  // ------------------------------------------------------------------ autopilot, tempo, modulation
+  const autopilot = useMemo(() => new Autopilot(), []);
+  const tapper = useMemo(() => new TapTempo(), []);
+  const [autoMode, setAutoModeState] = useState<AutoMode>("off");
+  const [autoBars, setAutoBarsState] = useState(8);
+  const [tempo, setTempo] = useState({ bpm: 120, locked: false });
+  const setAutoMode = useCallback((m: AutoMode) => { autopilot.mode = m; autopilot.reset(performance.now()); setAutoModeState(m); }, [autopilot]);
+  const setAutoBars = useCallback((b: number) => { autopilot.bars = b; setAutoBarsState(b); }, [autopilot]);
+  const autoEvent = useRef<(ev: "phrase" | "drop") => void>(() => {});
+  autoEvent.current = (ev) => {
+    const l = lookRef.current, sc = sceneById(l.scene);
+    if (ev === "drop") {
+      const n = randomizeLook(randomScene(l, allowed), allowed);
+      pushLook({ ...n, heat: Math.max(n.heat, 65), react: Math.max(n.react, 85) });
+      return;
+    }
+    if (autopilot.mode === "show") { pushLook(randomizeLook(randomScene(l, allowed), allowed)); return; }
+    const r = Math.random();
+    if (r < 0.35) {
+      const ids = PALETTES.map((p) => p.id).filter((id) => id !== l.palette);
+      pushLook({ ...l, palette: ids[Math.floor(Math.random() * ids.length)] });
+    } else if (r < 0.6 && sc.modes) pushLook({ ...l, modes: { ...l.modes, [sc.id]: ((l.modes[sc.id] ?? 0) + 1 + Math.floor(Math.random() * (sc.modes.length - 1))) % sc.modes.length } });
+    else { const n = randomizeLook(l, allowed); pushLook({ ...n, palette: Math.random() < 0.5 ? l.palette : n.palette }); }
+  };
+  useEffect(() => {
+    let raf = 0, lastT = 0;
+    const loop = (ts: number) => {
+      raf = requestAnimationFrame(loop);
+      if (exportAbort.current) return;
+      const ev = autopilot.tick(audio.bands, ts);
+      if (ev) autoEvent.current(ev);
+      if (ts - lastT > 500) { lastT = ts; setTempo((t) => (Math.round(t.bpm) !== Math.round(audio.bands.bpm) || t.locked !== !!audio.tempoLock ? { bpm: audio.bands.bpm, locked: !!audio.tempoLock } : t)); }
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [audio, autopilot]);
+  const tap = useCallback(() => {
+    const bpm = tapper.tap(performance.now());
+    if (bpm) { audio.setTempo(Math.round(bpm * 10) / 10, performance.now()); setTempo({ bpm, locked: true }); }
+  }, [audio, tapper]);
+  const unlockTempo = useCallback(() => { audio.setTempo(null); setTempo((t) => ({ ...t, locked: false })); }, [audio]);
+  useEffect(() => {
+    let told = false;
+    midi.onClock = (bpm, origin) => {
+      audio.setTempo(bpm, origin);
+      if (!told) { told = true; toast({ text: `Synced to MIDI clock · ${Math.round(bpm)} bpm` }); }
+    };
+  }, [midi, audio, toast]);
+  const [modOn, setModOn] = useState(false);
+  const [modSel, setModSel] = useState<string | null>(null);
+  const setMod = useCallback((t: string, m: Mod | null) => {
+    const l = lookRef.current;
+    const mods = { ...(l.mods ?? {}) };
+    if (m) mods[t] = m; else delete mods[t];
+    pushLook({ ...l, mods });
+  }, [pushLook]);
+
   // ------------------------------------------------------------------ offline export
   const [exporting, setExporting] = useState<{ p: ExportProgress | null } | null>(null);
   const exportAbort = useRef<AbortController | null>(null);
@@ -599,12 +680,12 @@ export default function App() {
     const ac = (exportAbort.current = new AbortController());
     try {
       if (decoded.current?.file !== f) decoded.current = { file: f, buffer: await decodeAudio(f) };
-      const base = lookRef.current;
       const L = lanesRef.current;
+      autopilot.reset(req.start * 1000);
       const res = await exportVideo(e, decoded.current.buffer, { ...recOpts, audio: true, ...req }, target, {
         signal: ac.signal,
         beforeFrame: (t) => {
-          let l = base;
+          let l = lookRef.current; // autopilot may change the base look mid-export
           for (const lane of Object.values(L)) { const v = sample(lane, t); if (v != null) l = applyTarget(l, lane.target, v); }
           beforeExportFrame.current?.(t, l);
           if (l !== e.look) e.setLook(l);
@@ -625,7 +706,13 @@ export default function App() {
   }, [audio, recOpts, toast]);
   /** Extra per-frame work during export (titles, lyrics, autopilot); set by those features. */
   const beforeExportFrame = useRef<((t: number, look: Look) => void) | null>(null);
-  beforeExportFrame.current = (t) => { if (engineRef.current) captions.update(engineRef.current, capRef.current, lyricsRef.current, t); };
+  beforeExportFrame.current = (t) => {
+    const e = engineRef.current;
+    if (!e) return;
+    const ev = autopilot.tick(e.audio.bands, t * 1000);
+    if (ev) autoEvent.current(ev);
+    captions.update(e, capRef.current, lyricsRef.current, t);
+  };
 
   useEffect(() => {
     if (!recording) return;
@@ -679,6 +766,10 @@ export default function App() {
       case "h": case "H": setHidden((v) => !v); break;
       case "d": case "D": setDebug((v) => !v); break;
       case "m": case "M": toggleLearn(); break;
+      case "a": case "A": { const next: AutoMode = autoMode === "off" ? "drift" : autoMode === "drift" ? "show" : "off"; setAutoMode(next); toast({ text: `Autopilot: ${next}`, ms: 1200 }); break; }
+      case "q": case "Q": setModOn((v) => !v); setModSel(null); setPanel(true); break;
+      case ".": tap(); break;
+      case ",": unlockTempo(); break;
       case "?": case "/": setSheet((s) => (s === "help" ? null : "help")); break;
     }
   };
@@ -771,6 +862,7 @@ export default function App() {
           <span className="k">Scene</span><span className="n">{scene.name}</span>{modeName && <span className="m">· {modeName}</span>}
           {scene.pro && !pro && <span className="pro-badge">PRO</span>}
         </button>
+        {autoMode !== "off" && <button className="scenechip glass" onClick={() => setAutoMode("off")} title="Autopilot is changing looks by itself. Click to stop (A)"><span className="k">Autopilot</span><span className="n">{autoMode}</span></button>}
         <div className="spacer" />
         {!pro && <button className="pro-btn glass" onClick={() => { setProReason(undefined); setSheet("pro"); }}><span className="pro-badge">PRO</span>Unlock</button>}
         <div className="tools glass">
@@ -823,6 +915,9 @@ export default function App() {
         clearLanes={() => { lanesRef.current = {}; setLanes({}); saveLanes(audio.trackName, {}); }}
         laneCount={Object.keys(lanes).length}
         midiOn={learn} toggleLearn={toggleLearn}
+        quality={{ value: quality, set: setQuality }}
+        mod={{ on: modOn, toggle: () => { setModOn((v) => !v); setModSel(null); }, selected: modSel, select: setModSel, set: setMod }}
+        auto={{ mode: autoMode, setMode: setAutoMode, bars: autoBars, setBars: setAutoBars, bpm: tempo.bpm, locked: tempo.locked, tap, unlock: unlockTempo }}
         text={{ st: cap, set: (q) => setCap((c) => ({ ...c, ...q })), lyricCount: lyrics.length, onLyrics: () => lrcInput.current?.click(), clearLyrics: () => setLyrics([]) }}
       />
 
@@ -854,7 +949,7 @@ export default function App() {
 
       {sheet === "scenes" && <SceneGrid current={look.scene} pro={pro} onPick={pickScene} onClose={() => setSheet(null)} />}
       {sheet === "palette" && <PaletteSheet current={look.palette} photo={photoPal} onPick={pickPalette} onClose={() => setSheet(null)} />}
-      {sheet === "presets" && <PresetSheet presets={presets} current={curPreset} morph={morph} setMorph={setMorph} onRecall={(n) => { recallPreset(n); }} onSave={savePreset} onClear={(n) => { const p = { ...presets }; delete p[n]; persist(p); }} onExport={exportPresets} onImport={importPresets} onClose={() => setSheet(null)} />}
+      {sheet === "presets" && <PresetSheet presets={presets} current={curPreset} morph={morph} setMorph={setMorph} onRecall={(n) => { recallPreset(n); }} onSave={savePreset} onClear={(n) => { const p = { ...presets }; delete p[n]; persist(p); }} onExport={exportPresets} onImport={importPresets} onShare={copyShareLink} onClose={() => setSheet(null)} />}
       {sheet === "help" && <HelpSheet onClose={() => setSheet(null)} />}
       {sheet === "record" && <RecordSheet pro={pro} opts={recOpts} setOpts={setRecOpts} onStart={startRecording} onExport={runExport} onClose={() => setSheet(null)} onPro={() => gatePro("1440p and 4K recording are part of Pro.")} track={src.kind === "track" && trackFile.current ? { name: audio.trackName, duration: audio.duration || 0 } : null} exportOk={exportSupported()} />}
       {exporting && <ExportProgressSheet p={exporting.p} onCancel={() => exportAbort.current?.abort()} />}

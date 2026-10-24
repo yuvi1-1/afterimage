@@ -42,6 +42,10 @@ export class AudioEngine {
   private onsets: number[] = [];
   private smoothedFFT = new Float32Array(FFT_BINS);
   demo: DemoBeat | null = null;
+  /** Tempo set by tap or MIDI clock; overrides kick-based tempo and beat phase. */
+  tempoLock: number | null = null;
+  tempoOrigin = 0;
+  setTempo(bpm: number | null, origin = performance.now()) { this.tempoLock = bpm; this.tempoOrigin = origin; if (bpm) this.bands.bpm = bpm; }
   onKick: (() => void) | null = null;
   onChange: (() => void) | null = null;
   videoNode: MediaElementAudioSourceNode | null = null;
@@ -251,8 +255,14 @@ export class AudioEngine {
     const fall = Math.pow(0.02, dt * (1.3 + (1 - decay) * 2.5));
     B.kick *= fall;
     B.accent *= Math.pow(0.02, dt * 3);
-    const period = 60000 / B.bpm;
-    B.beatPhase = ((now - this.lastKick) % period) / period;
+    if (this.tempoLock) {
+      B.bpm = this.tempoLock;
+      const period = 60000 / B.bpm;
+      B.beatPhase = ((((now - this.tempoOrigin) % period) + period) % period) / period;
+    } else {
+      const period = 60000 / B.bpm;
+      B.beatPhase = ((now - this.lastKick) % period) / period;
+    }
     // textures
     for (let i = 0; i < FFT_BINS; i++) this.fftTex[i] = this.smoothedFFT[i] * 255;
     for (let i = 0; i < FFT_BINS; i++) {
@@ -266,7 +276,7 @@ export class AudioEngine {
   }
 
   private estimateTempo() {
-    if (this.onsets.length < 6) return;
+    if (this.tempoLock || this.onsets.length < 6) return;
     // fold intervals into 80..170 bpm and take the median
     const bpms = this.onsets.map((ms) => {
       let b = 60000 / ms;

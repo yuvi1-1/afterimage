@@ -19,6 +19,9 @@ export class Engine {
   /** smoothed copies of numeric params */
   cur: Record<string, number> = {};
   curScene: number[] = [0, 0, 0, 0, 0, 0];
+  /** smoothed values before audio modulation */
+  private sm: Record<string, number> = {};
+  private smScene: number[] = [0, 0, 0, 0, 0, 0];
   scene: Scene = SCENES[0];
   sim: Sim | null = null;
   programs = new Map<string, Program>();
@@ -47,6 +50,8 @@ export class Engine {
   height = 0;
   fixedSize: [number, number] | null = null;
   renderScale = 1;
+  /** Upper bound for the adaptive render scale (quality setting). */
+  maxScale = 1;
   time = 0;
   sceneTime = 0;
   hue = 0;
@@ -103,8 +108,9 @@ export class Engine {
     const sc = sceneById(look.scene);
     if (sc.id !== this.scene.id || (!this.sim && sc.sim) || !this.programs.size) this.switchScene(sc);
     if (snap) {
-      for (const d of GLOBALS) this.cur[d.key] = look[d.key];
+      for (const d of GLOBALS) this.cur[d.key] = this.sm[d.key] = look[d.key];
       this.curScene = this.sceneValues().slice();
+      this.smScene = this.curScene.slice();
     }
   }
 
@@ -122,6 +128,7 @@ export class Engine {
       try { this.sim.init(this); } catch (e) { this.fail(e); }
     } else this.sceneProgram(sc);
     this.curScene = this.sceneValues().slice();
+    this.smScene = this.curScene.slice();
     this.resize(true);
   }
 
@@ -282,11 +289,13 @@ export class Engine {
     const k = 1 - Math.exp(-dt * 9);
     for (const d of GLOBALS) {
       const t = this.look[d.key as GlobalKey];
-      if (this.cur[d.key] == null || d.int) this.cur[d.key] = t;
-      else this.cur[d.key] += (t - this.cur[d.key]) * k;
+      if (this.sm[d.key] == null || d.int) this.sm[d.key] = t;
+      else this.sm[d.key] += (t - this.sm[d.key]) * k;
+      this.cur[d.key] = this.sm[d.key];
     }
     const tv = this.sceneValues();
-    this.curScene = tv.map((v, i) => (this.curScene[i] ?? v) + (v - (this.curScene[i] ?? v)) * k);
+    this.smScene = tv.map((v, i) => (this.smScene[i] ?? v) + (v - (this.smScene[i] ?? v)) * k);
+    this.curScene = this.smScene.slice();
     // palette
     const stops = this.look.palette === "photo" && this.photoPalette ? this.photoPalette : (PALETTES.find((p) => p.id === this.look.palette) ?? PALETTES[0]).c;
     const pk = 1 - Math.exp(-dt * 4);
@@ -295,6 +304,7 @@ export class Engine {
     const gain = Math.pow(4, (this.cur.gain - 50) / 50);
     this.audio.update(dt, now, gain, this.cur.decay / 100, ext);
     const b = this.audio.bands;
+    this.applyMods(b);
     const speed = this.scene.sliders[0]?.label === "speed" ? 0.15 + (this.curScene[0] / 50) * 0.85 : 1;
     this.time += dt;
     this.sceneTime += dt * speed * (1 + b.level * this.react * 0.5);
@@ -410,7 +420,33 @@ export class Engine {
       if (!this.offline) {
         if (this.fps < 42) { this.slow++; this.fast = 0; } else if (this.fps > 57) { this.fast++; this.slow = 0; } else { this.slow = this.fast = 0; }
         if (this.slow >= 3 && this.renderScale > 0.4) { this.renderScale *= 0.82; this.slow = 0; this.resize(true); }
-        if (this.fast >= 8 && this.renderScale < 1) { this.renderScale = Math.min(1, this.renderScale * 1.15); this.fast = 0; this.resize(true); }
+        if (this.fast >= 8 && this.renderScale < this.maxScale) { this.renderScale = Math.min(this.maxScale, this.renderScale * 1.15); this.fast = 0; this.resize(true); }
+        if (this.renderScale > this.maxScale) { this.renderScale = this.maxScale; this.resize(true); }
+      }
+    }
+  }
+
+  /** Audio modulation: each modulated control moves with its source on top of its set value. */
+  private applyMods(b: AudioEngine["bands"]) {
+    const mods = this.look.mods;
+    if (!mods) return;
+    const lfo = 0.5 + 0.5 * Math.sin((this.time * Math.PI * 2 * b.bpm) / 60 / 4);
+    const src = { bass: Math.min(1, b.bass), mid: Math.min(1, b.mid), high: Math.min(1, b.high), kick: Math.min(1, b.kick), beat: 1 - b.beatPhase, lfo };
+    for (const [key, m] of Object.entries(mods)) {
+      if (!m || !m.amt) continue;
+      const v = src[m.src] ?? 0;
+      if (key.startsWith("g:")) {
+        const d = GLOBALS.find((g) => g.key === key.slice(2));
+        if (!d) continue;
+        let x = this.sm[d.key] + m.amt * (d.max - d.min) * v;
+        x = Math.max(d.min, Math.min(d.max, x));
+        this.cur[d.key] = d.int ? Math.round(x) : x;
+      } else if (key.startsWith("s:")) {
+        const [idx, sid] = key.slice(2).split("@");
+        if (sid !== this.scene.id) continue;
+        const i = +idx;
+        if (this.smScene[i] == null) continue;
+        this.curScene[i] = Math.max(0, Math.min(100, this.smScene[i] + m.amt * 100 * v));
       }
     }
   }

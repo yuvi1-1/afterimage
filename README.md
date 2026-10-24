@@ -18,22 +18,23 @@ Audio-reactive visuals from any song, photo or album cover, in your browser or a
 
 </div>
 
-Play music and the picture moves with it. Afterimage separates bass, mids and highs and detects kicks, accents and tempo. The analysis drives 17 GPU scenes: fluid simulations, raymarched fractals, particle fields, reaction-diffusion and lab-grade meters.
+Play music and the picture moves with it. Afterimage separates bass, mids and highs and detects kicks, accents and tempo, and 26 GPU scenes respond to all of it: fluid simulations, raymarched fractals, particle fields, reaction-diffusion and lab-grade meters.
 
-Drop in a screenshot of Spotify or Apple Music and it finds the album cover, takes the colors from it and builds the visuals around the artwork. Drop a transparent logo and it becomes an emblem that pulses on the beat.
+Drop in a song and its album art, title, artist and lyrics load with it. Drop a screenshot of Spotify or Apple Music instead and it finds the cover, takes the colors from it and builds the visuals around the artwork.
 
 ## Highlights
 
-- **Listens to anything**: the desktop app follows whatever your computer is playing (Spotify, YouTube, a DJ app) as soon as it opens. Also works with a mic or audio interface, an audio file, a video's sound, or the built-in demo groove.
-- **Album covers found automatically**: a local detector scans screenshots for the most cover-like square, inside a worker so the visuals never stutter. Nothing is uploaded.
-- **17 scenes, all real-time GPU**: stable-fluids simulation, Mandelbulb and Mandelbox raymarchers, a 65k-particle curl-noise field, Gray-Scott reaction-diffusion you can paint with the mouse, Chladni plates, spectrogram terrain and more.
-- **Five big edits**: react, chaos, trails, heat and brightness. Then frame tricks (symmetry, tiles, twist, slice, spin), seven optical lenses and hue drift.
+- **Export the whole song to video.** Every frame is rendered offline and encoded straight to MP4 (H.264 + AAC) at 1080p, 1440p or 4K, 30 or 60 fps, in 16:9, 9:16 or 1:1. Nothing drops, whatever the GPU, and it usually runs faster than real time.
+- **Your music's own artwork.** Cover art, title, artist and lyrics are read from MP3 (ID3), M4A/MP4 and FLAC files, entirely on the device. Screenshots are scanned for the album cover in a background worker.
+- **Title cards and synced lyrics.** Corner, lower-third or full-screen titles in four type styles, plus `.lrc` synced lyrics with timing nudge. Text breathes with the kick and is drawn above every effect, in recordings and exports alike.
+- **26 scenes, all real-time GPU.** New in 1.1: Halo (the classic circular spectrum around your cover), Vinyl, Monolith, Dust (the cover as 65,000 particles), Tunnel, Aurora, Lasers, Chrome and Skyline.
+- **Autopilot for live sets.** Drift nudges the look every phrase. Show changes scene on every phrase. Both hit hard on drops. Phrases are counted in bars from the kicks, a tapped tempo or MIDI clock.
+- **Audio modulation on any control.** Bass, mids, highs, kick, beat or a bar-length LFO can drive any slider, positive or negative, on top of where you set it.
+- **Tempo:** automatic, tap (`.`), or locked to MIDI clock from your DAW or drum machine.
+- **Five big edits, frame tricks and lenses:** react, chaos, trails, heat and brightness; symmetry, tiles, twist, slice and spin; seven optical lenses; hue drift.
 - **24 palettes**, plus one taken from your image.
-- **128 preset slots** with timed morphing between looks. Banks import and export as JSON.
-- **Automation lanes**: arm it, play the track and move controls. Your moves replay on every pass and show on the scrubber.
-- **MIDI learn**: click a control, turn a knob, done.
-- **Record** at 1080p, 1440p or 4K, 30 or 60 fps, in 16:9, 9:16 or 1:1. Saves MP4 with audio, plus PNG stills.
-- **Output window** for projectors and second screens, perfect for VJ sets.
+- **128 preset slots** with timed morphing, JSON import/export, and **share links** that open any look exactly.
+- **Automation lanes**, **MIDI learn**, a live **output window** for projectors, and **installable offline web app**.
 - **Keyboard first**: every action is one key away.
 
 <img src="docs/gallery.jpg" alt="Sixteen of the scenes" />
@@ -42,12 +43,12 @@ Drop in a screenshot of Spotify or Apple Music and it finds the album cover, tak
 
 | Group | Scenes |
 | --- | --- |
-| Image | **Limitless**: your photo, cover, video or camera through 22 effect modes (Droste, corridor, planet, shatter, prism, pixel sort, datamosh, halftone, VHS and more) |
-| Fluid | **Ink** (folding smoke) · **Fluid** (real fluid simulation; kicks stir it) |
-| Fractal | **Relic** (Mandelbulb) · **Citadel** (Mandelbox) · **Mandala** (escape-time kaleidoscope) · **Descent** (endless carved vault, 4 looks) |
-| Space | **Gate** (machined arch hall) · **Spacetime** (warp streaks) · **Wisp** (GPU particles) |
-| Pattern | **Anemone** (4 modes) · **Synapse** (firing network) · **Morphogen** (reaction-diffusion) · **Sand** (Chladni figures) |
-| Signal | **Rings** · **Ridge** (spectrogram terrain) · **Signal** (analyzer, waterfall, scope, goniometer, Lissajous) |
+| Image | **Limitless** (22 effect modes: Droste, corridor, planet, shatter, prism, pixel sort, datamosh, halftone, VHS…) · **Halo** · **Vinyl** · **Monolith** · **Dust** · **Tunnel** |
+| Fluid | **Ink** · **Fluid** (real fluid simulation) |
+| Fractal | **Relic** (Mandelbulb) · **Citadel** (Mandelbox) · **Mandala** · **Descent** · **Chrome** (liquid metal) |
+| Space | **Gate** · **Spacetime** · **Wisp** (GPU particles) · **Aurora** · **Lasers** |
+| Pattern | **Anemone** · **Synapse** · **Morphogen** (reaction-diffusion you can paint) · **Sand** (Chladni figures) |
+| Signal | **Rings** · **Ridge** (spectrogram terrain) · **Skyline** (3D spectrum city) · **Signal** (analyzer, waterfall, scope, goniometer, Lissajous) |
 
 <p align="center"><img src="docs/cover-detection.jpg" width="49%" alt="Album cover detected in a player screenshot" /> <img src="docs/scenes.jpg" width="49%" alt="Scene browser" /></p>
 
@@ -65,6 +66,8 @@ Drop in a screenshot of Spotify or Apple Music and it finds the album cover, tak
 | `R` | Record | `S` | Save still |
 | `O` | Output window | `F` | Fullscreen |
 | `M` | MIDI learn | `H` | Hide interface |
+| `A` | Autopilot off / drift / show | `Q` | Audio modulation |
+| `.` | Tap tempo | `,` | Automatic tempo |
 | `D` | Debug overlay | `?` | All shortcuts |
 
 ## Getting started
@@ -98,6 +101,7 @@ image ──► cover detector (worker) ──► crop + 5-colour palette
                                                          MediaRecorder (MP4) · output window ◄────┘
 ```
 
+- **Export** (`src/lib/exporter.ts`, `src/engine/offline.ts`): an offline analyser that reproduces the Web Audio AnalyserNode exactly (Blackman window, smoothing, dB mapping), so exports react like playback; frames go through WebCodecs into an MP4 muxer, streamed to disk.
 - **Engine** (`src/engine`): a WebGL2 multi-pass renderer. It uses half-float HDR targets and mipmapped feedback for trails, auto-exposure from a 1×1 luma reduction, and adaptive render scale to hold 60 fps.
 - **Scenes** (`src/scenes`): each is either a fragment shader implementing `vec3 scene(vec2 p, vec2 uv)`, or a multi-pass `Sim` (fluid, reaction-diffusion, particles) with access to the same audio uniforms and textures.
 - **App** (`src/App.tsx`, `src/ui`): React interface, presets, automation, MIDI, recording and licensing.
@@ -107,11 +111,12 @@ image ──► cover detector (worker) ──► crop + 5-colour palette
 
 | | Free | Pro |
 | --- | :---: | :---: |
-| 9 scenes, all palettes, presets, automation | ✓ | ✓ |
-| 8 Pro scenes (fluid, fractals, particles, reaction-diffusion) | 20 s preview | ✓ |
-| 1080p recording | ✓ | ✓ |
-| 1440p and 4K recording | | ✓ |
-| Output window, MIDI mapping | | ✓ |
+| 14 scenes, all palettes, presets, automation, autopilot, modulation | ✓ | ✓ |
+| Cover art, titles and synced lyrics | ✓ | ✓ |
+| 12 Pro scenes (Vinyl, Monolith, Dust, Chrome, Fluid, fractals, particles, reaction-diffusion) | 20 s preview | ✓ |
+| 1080p recording and full-song export | ✓ | ✓ |
+| 1440p and 4K recording and export | | ✓ |
+| Output window, MIDI mapping and MIDI clock | | ✓ |
 
 Licenses are offline Ed25519 keys: the app checks them itself, with no account or login.
 
@@ -159,8 +164,8 @@ For public releases, set `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_
 ```
 src/
   engine/     renderer, audio analysis, GLSL, palettes, parameters
-  scenes/     17 scenes (shaders + simulations)
-  lib/        cover detection, presets, MIDI, recording, automation, licensing
+  scenes/     26 scenes (shaders + simulations)
+  lib/        cover detection, tags and lyrics, captions, export, autopilot, presets, MIDI, licensing
   ui/         panel, transport, sheets, controls
 desktop/      Electron main process
 scripts/      license key tool

@@ -26,11 +26,18 @@ export const GLOBALS: Def[] = [
 
 export const LENS_STYLES = ["glass ribs", "glass fan", "anamorphic", "melt", "glitch", "pixels", "fly eye"];
 
+/** Audio modulation of one control: adds amt × full range × the source's level. */
+export type ModSrc = "bass" | "mid" | "high" | "kick" | "lfo" | "beat";
+export type Mod = { src: ModSrc; amt: number };
+export const MOD_SOURCES: ModSrc[] = ["bass", "mid", "high", "kick", "beat", "lfo"];
+
 export type Look = Record<GlobalKey, number> & {
   scene: string;
   palette: string; // palette id, or "photo" for colors taken from the dropped image
   modes: Record<string, number>;
   sceneValues: Record<string, number[]>;
+  /** per-control audio modulation, keyed like "g:twist" or "s:2" (scene sliders are per scene: "s:2@relic") */
+  mods?: Record<string, Mod>;
 };
 
 export const DEFAULT_GLOBALS = Object.fromEntries(GLOBALS.map((d) => [d.key, d.def])) as Record<GlobalKey, number>;

@@ -11,6 +11,10 @@ export class Midi {
   inputs: string[] = [];
   onValue: ((t: MidiTarget, v: number) => void) | null = null;
   onChange: (() => void) | null = null;
+  /** MIDI clock (24 pulses per beat) from a DAW or drum machine */
+  onClock: ((bpm: number, origin: number) => void) | null = null;
+  private clocks: number[] = [];
+  private clockOrigin = 0;
   supported = typeof navigator !== "undefined" && "requestMIDIAccess" in navigator;
 
   constructor() {
@@ -42,6 +46,7 @@ export class Midi {
   }
 
   private handle(d: Uint8Array | null) {
+    if (d && d.length && d[0] >= 0xf8) { this.clock(d[0]); return; }
     const m = this.parse(d);
     if (!m) return;
     if (this.learning) {
@@ -54,6 +59,20 @@ export class Midi {
     }
     const t = this.map[m.id];
     if (t) this.onValue?.(t, m.value);
+  }
+
+  private clock(status: number) {
+    const now = performance.now();
+    if (status === 0xfa || status === 0xfb) { this.clocks = []; this.clockOrigin = now; return; } // start / continue
+    if (status !== 0xf8) return;
+    this.clocks.push(now);
+    if (this.clocks.length > 97) this.clocks.shift();
+    if (this.clocks.length >= 25 && this.clocks.length % 24 === 1) {
+      const span = this.clocks[this.clocks.length - 1] - this.clocks[0];
+      const beats = (this.clocks.length - 1) / 24;
+      const bpm = (60000 * beats) / span;
+      if (bpm > 40 && bpm < 250) this.onClock?.(Math.round(bpm * 10) / 10, this.clockOrigin || this.clocks[0]);
+    }
   }
 
   learn(t: MidiTarget | null) { this.learning = t; this.onChange?.(); }

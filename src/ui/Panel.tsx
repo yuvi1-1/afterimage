@@ -1,6 +1,7 @@
 import type { Emblem } from "../engine/engine";
 import type { CaptionState } from "../lib/captions";
-import { GLOBALS, LENS_STYLES, type Def, type Look } from "../engine/params";
+import { GLOBALS, LENS_STYLES, MOD_SOURCES, type Def, type Look, type Mod } from "../engine/params";
+import type { AutoMode } from "../lib/autopilot";
 import type { Scene } from "../scenes/types";
 import { Icon } from "./Icons";
 import { Slider, Toggle } from "./Slider";
@@ -30,18 +31,30 @@ type Props = {
   laneCount: number;
   midiOn: boolean;
   toggleLearn: () => void;
+  quality: { value: number; set: (q: number) => void };
+  mod: { on: boolean; toggle: () => void; selected: string | null; select: (t: string) => void; set: (t: string, m: Mod | null) => void };
+  auto: { mode: AutoMode; setMode: (m: AutoMode) => void; bars: number; setBars: (b: number) => void; bpm: number; locked: boolean; tap: () => void; unlock: () => void };
   text: { st: CaptionState; set: (p: Partial<CaptionState>) => void; lyricCount: number; onLyrics: () => void; clearLyrics: () => void };
 };
 
 export function Panel(p: Props) {
   const { look, scene, learn } = p;
-  const ctl = (t: string) => ({
-    learn: (learn.on ? (learn.learning === t ? "learning" : "armed") : "off") as "off" | "armed" | "learning",
-    onLearn: () => learn.pick(t),
-    midiTag: learn.tag(t),
-    automated: p.automated(t),
-    onGrab: (d: boolean) => p.grab(t, d),
-  });
+  // scene sliders are modulated per scene, so their modulation key carries the scene id
+  const modKey = (t: string) => (t.startsWith("s:") ? `${t}@${scene.id}` : t);
+  const modOf = (t: string) => look.mods?.[modKey(t)];
+  const ctl = (t: string) => {
+    const m = modOf(t);
+    const tag = [learn.tag(t), m && m.amt ? `~${m.src}` : null].filter(Boolean).join(" ") || null;
+    return {
+      learn: (learn.on ? (learn.learning === t ? "learning" : "armed") : p.mod.on ? (p.mod.selected === modKey(t) ? "learning" : "armed") : "off") as "off" | "armed" | "learning",
+      onLearn: () => (learn.on ? learn.pick(t) : p.mod.select(modKey(t))),
+      midiTag: tag,
+      automated: p.automated(t),
+      onGrab: (d: boolean) => p.grab(t, d),
+    };
+  };
+  const selMod = p.mod.selected ? look.mods?.[p.mod.selected] : undefined;
+  const selLabel = p.mod.selected ? (p.mod.selected.startsWith("g:") ? GLOBALS.find((d) => `g:${d.key}` === p.mod.selected)?.label : scene.sliders[+p.mod.selected.slice(2).split("@")[0]]?.label) : null;
   const g = (d: Def, extra: { big?: boolean; format?: (v: number) => string } = {}) => (
     <Slider key={d.key} label={d.label} value={look[d.key]} min={d.min} max={d.max} def={d.def} int={d.int} hint={d.hint} onChange={(v) => p.set(`g:${d.key}`, v)} {...ctl(`g:${d.key}`)} {...extra} />
   );
@@ -52,11 +65,48 @@ export function Panel(p: Props) {
       <div className="panel-head">
         <h3>Tuning</h3>
         <button className="btn ghost" onClick={p.onRandom} data-tip="Randomize look (L)"><Icon.dice /></button>
+        <button className="btn ghost" onClick={p.mod.toggle} data-tip="Audio modulation (Q)" style={p.mod.on ? { color: "var(--accent)" } : undefined}><Icon.wave /></button>
         <button className={`btn ghost${learn.on ? " on" : ""}`} onClick={p.toggleLearn} data-tip="MIDI learn (M)" style={learn.on ? { color: "var(--accent)" } : undefined}><Icon.knob /></button>
         <button className="btn ghost" onClick={p.onClose} data-tip="Close (E)"><Icon.x /></button>
       </div>
       <div className="panel-body">
         {learn.on && <div className="hint" style={{ color: "var(--accent)" }}>MIDI learn: click a control, then move a knob or fader on your controller. Press M when done.</div>}
+        {p.mod.on && (
+          <div className="sec" style={{ borderTop: 0 }}>
+            <div className="sec-h"><span style={{ color: "var(--accent)" }}>Modulation{selLabel ? ` · ${selLabel}` : ""}</span>{p.mod.selected && selMod && <button onClick={() => p.mod.set(p.mod.selected!, null)}>remove</button>}</div>
+            {!p.mod.selected ? (
+              <div className="hint">Click any control below, then pick what moves it. The control rides the music on top of where you set it.</div>
+            ) : (
+              <>
+                <div className="seg">
+                  {MOD_SOURCES.map((src) => (
+                    <button key={src} className={selMod?.src === src ? "on" : ""} onClick={() => p.mod.set(p.mod.selected!, { src, amt: selMod?.amt || 0.3 })}>{src}</button>
+                  ))}
+                </div>
+                <Slider label="amount" value={(selMod?.amt ?? 0) * 100} min={-100} max={100} def={0} format={(v) => `${v > 0 ? "+" : ""}${Math.round(v)}%`} onChange={(v) => p.mod.set(p.mod.selected!, { src: selMod?.src ?? "bass", amt: v / 100 })} />
+              </>
+            )}
+          </div>
+        )}
+        <div className="sec">
+          <div className="sec-h"><span>Autopilot</span><span className="num" style={{ textTransform: "none", letterSpacing: 0 }}>{Math.round(p.auto.bpm)} bpm{p.auto.locked ? " · locked" : ""}</span></div>
+          <div className="seg">
+            {(["off", "drift", "show"] as const).map((m) => (
+              <button key={m} className={p.auto.mode === m ? "on" : ""} onClick={() => p.auto.setMode(m)}>{m}</button>
+            ))}
+            <span style={{ flex: 1 }} />
+            <button onClick={p.auto.tap} title="Tap along with the beat (.)">tap</button>
+            {p.auto.locked && <button onClick={p.auto.unlock} title="Back to automatic tempo (,)">auto</button>}
+          </div>
+          {p.auto.mode !== "off" && (
+            <div className="seg">
+              {[4, 8, 16].map((b) => (
+                <button key={b} className={p.auto.bars === b ? "on" : ""} onClick={() => p.auto.setBars(b)}>every {b} bars</button>
+              ))}
+            </div>
+          )}
+          <div className="hint">{p.auto.mode === "drift" ? "Drift nudges colors, modes and the look every phrase, and goes big on drops." : p.auto.mode === "show" ? "Show changes scene on every phrase and hits hard on drops. Built for live sets." : "Let Afterimage change looks on phrases and drops by itself (A)."}</div>
+        </div>
         <div className="sec">
           {by("big").map((d) => g(d, { big: true }))}
         </div>
@@ -98,6 +148,13 @@ export function Panel(p: Props) {
         <div className="sec">
           <div className="sec-h"><span>Input</span></div>
           {by("input").map((d) => g(d, d.key === "gain" ? { format: (v) => `${(Math.pow(4, (v - 50) / 50)).toFixed(2)}×` } : {}))}
+          <div className="sec-h" style={{ marginTop: 10 }}><span>Quality</span></div>
+          <div className="seg">
+            {([[1, "sharp"], [0.75, "balanced"], [0.5, "fast"]] as const).map(([q, n]) => (
+              <button key={n} className={p.quality.value === q ? "on" : ""} onClick={() => p.quality.set(q)}>{n}</button>
+            ))}
+          </div>
+          <div className="hint">Lower it on older laptops. Exports always render at full quality.</div>
         </div>
 
         {p.emblem && (

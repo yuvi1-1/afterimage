@@ -78,10 +78,10 @@ export function PaletteSheet({ current, photo, onPick, onClose }: { current: str
   );
 }
 
-export function PresetSheet({ presets, current, morph, setMorph, onRecall, onSave, onClear, onExport, onImport, onClose }: {
+export function PresetSheet({ presets, current, morph, setMorph, onRecall, onSave, onClear, onExport, onImport, onShare, onClose }: {
   presets: Record<number, Preset>; current: number | null; morph: number; setMorph: (ms: number) => void;
   onRecall: (n: number) => void; onSave: (n: number) => void; onClear: (n: number) => void;
-  onExport: () => void; onImport: (f: File) => void; onClose: () => void;
+  onExport: () => void; onImport: (f: File) => void; onShare: () => void; onClose: () => void;
 }) {
   const file = useRef<HTMLInputElement>(null);
   const [hover, setHover] = useState<number | null>(null);
@@ -90,6 +90,7 @@ export function PresetSheet({ presets, current, morph, setMorph, onRecall, onSav
   return (
     <Sheet title="Presets" sub="128 slots" onClose={onClose} actions={
       <div className="row">
+        <button className="btn ghost" onClick={onShare} title="Copy a link that opens the current look">Share look</button>
         <button className="btn ghost" onClick={() => file.current?.click()}>Import</button>
         <button className="btn ghost" onClick={onExport}>Export</button>
         <input ref={file} type="file" accept=".json,application/json" hidden onChange={(e) => e.target.files?.[0] && onImport(e.target.files[0])} />
@@ -123,6 +124,7 @@ const KEYS: [string, string[]][] = [
   ["Randomize look", ["L"]], ["Random scene", ["N"]], ["Shuffle everything", ["X"]], ["Swap back", ["B"]], ["Undo", ["⌘/Ctrl", "Z"]],
   ["Recall preset", ["1–9"]], ["Save preset", ["Shift", "1–9"]], ["Presets", ["K"]],
   ["Record video", ["R"]], ["Save still (PNG)", ["S"]], ["Output window", ["O"]], ["Fullscreen", ["F"]], ["Hide interface", ["H"]],
+  ["Autopilot off / drift / show", ["A"]], ["Audio modulation", ["Q"]], ["Tap tempo", ["."]], ["Automatic tempo", [","]],
   ["MIDI learn", ["M"]], ["Debug overlay", ["D"]], ["Open file", ["⌘/Ctrl", "O"]], ["Help", ["?"]],
 ];
 
@@ -132,7 +134,7 @@ export function HelpSheet({ onClose }: { onClose: () => void }) {
       <div className="keys">
         {KEYS.map(([a, k]) => <div key={a}><span>{a}</span><span>{k.map((x) => <kbd key={x}>{x}</kbd>)}</span></div>)}
       </div>
-      <p className="hint" style={{ marginTop: 18 }}>Drop a track, a photo, a screenshot of your player or a video anywhere on the window. Screenshots are scanned for the album cover, and transparent logos become an emblem that rides the beat.</p>
+      <p className="hint" style={{ marginTop: 18 }}>Drop a track (its album art, title and lyrics load with it), an .lrc lyrics file, a photo, a screenshot of your player or a video anywhere on the window. Screenshots are scanned for the album cover, and transparent logos become an emblem that rides the beat.</p>
     </Sheet>
   );
 }
@@ -203,7 +205,8 @@ export function RecordSheet({ pro, opts, setOpts, onStart, onExport, onClose, on
               <button className={quality === "high" ? "on" : ""} onClick={() => setQuality("high")}>High</button>
             </div>
             {err && <div className="err">{err}</div>}
-            <p className="hint">{w} × {h} · {opts.fps} fps · MP4 with audio · about {mb < 1000 ? `${Math.max(1, Math.round(mb))} MB` : `${(mb / 1000).toFixed(1)} GB`}. Every frame is rendered, so nothing drops even at 4K. Automation lanes are included. {track.name}</p>
+            <p className="hint"><b style={{ color: "var(--text)", fontWeight: 600 }}>{track.name}</b> · {w} × {h} · {opts.fps} fps · MP4 with audio · about {mb < 1000 ? `${Math.max(1, Math.round(mb))} MB` : `${(mb / 1000).toFixed(1)} GB`}</p>
+            <p className="hint">Every frame is rendered, so nothing drops even at 4K, and it usually runs faster than the song itself. Automation, titles, lyrics and autopilot are all included.</p>
             <div className="row" style={{ justifyContent: "flex-end", marginTop: 8 }}>
               <button className="btn ghost" onClick={onClose}>Cancel</button>
               <button className="btn primary" onClick={go}><Icon.rec /> Export video</button>
@@ -280,7 +283,7 @@ export function ProSheet({ license, reason, onActivate, onDeactivate, onClose }:
           {reason && <p style={{ marginTop: 0, color: "var(--accent)" }}>{reason}</p>}
           <ul style={{ margin: "0 0 14px", paddingLeft: 18, color: "var(--dim)", lineHeight: 1.8 }}>
             <li>All {SCENES.filter((s) => s.pro).length} Pro scenes: fluids, fractals, particles, reaction-diffusion</li>
-            <li>1440p and 4K video recording</li>
+            <li>1440p and 4K recording and full-song video export</li>
             <li>Output window for projectors and second screens</li>
             <li>MIDI controller mapping</li>
             <li>Web and desktop app, one license, every update</li>

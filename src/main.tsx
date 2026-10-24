@@ -13,3 +13,6 @@ if (q.get("scene")) {
 if (/Electron/.test(navigator.userAgent) && /Mac/.test(navigator.platform)) document.documentElement.classList.add("mac-app");
 
 createRoot(document.getElementById("root")!).render(<App />);
+
+// installable, works offline after the first visit (web only; the desktop app has its own files)
+if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("./sw.js").catch(() => {});

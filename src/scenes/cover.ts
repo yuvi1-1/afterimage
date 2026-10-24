@@ -354,7 +354,9 @@ vec3 scene(vec2 p, vec2 uv){
     float d = (horizon - p.y);
     float zz = .85/max(d, 1e-3);
     vec2 g = vec2(p.x*zz, zz + uT*1.5);
-    float line = smoothstep(.04, 0., min(abs(fract(g.x*2.) - .5), abs(fract(g.y) - .5)) - .46)*exp(-zz*.08);
+    vec2 gf = vec2(fract(g.x*2.), fract(g.y));
+    vec2 gd = min(gf, 1. - gf);
+    float line = smoothstep(.05, 0., min(gd.x, gd.y))*exp(-zz*.1);
     col += pal(.7)*line*.3*(1. + uKick);
   }
   return col;
