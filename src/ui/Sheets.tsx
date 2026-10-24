@@ -137,7 +137,20 @@ export function HelpSheet({ onClose }: { onClose: () => void }) {
   );
 }
 
-export function RecordSheet({ pro, opts, setOpts, onStart, onClose, onPro }: { pro: boolean; opts: RecordOpts; setOpts: (o: RecordOpts) => void; onStart: () => void; onClose: () => void; onPro: () => void }) {
+const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+const parseTime = (v: string) => { const m = v.trim().match(/^(\d+):(\d{1,2})$/); return m ? +m[1] * 60 + +m[2] : /^\d+(\.\d+)?$/.test(v.trim()) ? +v : NaN; };
+
+export type ExportRequest = { start: number; end: number; quality: "standard" | "high" };
+
+export function RecordSheet({ pro, opts, setOpts, onStart, onExport, onClose, onPro, track, exportOk }: {
+  pro: boolean; opts: RecordOpts; setOpts: (o: RecordOpts) => void; onStart: () => void; onExport: (r: ExportRequest) => void;
+  onClose: () => void; onPro: () => void; track: { name: string; duration: number } | null; exportOk: boolean;
+}) {
+  const [mode, setMode] = useState<"export" | "live">(track && exportOk ? "export" : "live");
+  const [from, setFrom] = useState("0:00");
+  const [to, setTo] = useState(track ? mmss(track.duration) : "0:00");
+  const [quality, setQuality] = useState<"standard" | "high">("high");
+  const [err, setErr] = useState("");
   const [w, h] = recordSize(opts);
   const { ext } = pickMime();
   const seg = <T extends string | number>(vals: T[], cur: T, key: keyof RecordOpts, label: (v: T) => string, locked?: (v: T) => boolean) => (
@@ -149,23 +162,88 @@ export function RecordSheet({ pro, opts, setOpts, onStart, onClose, onPro }: { p
       ))}
     </div>
   );
+  const start = parseTime(from), end = parseTime(to);
+  const len = isFinite(start) && isFinite(end) ? Math.max(0, end - start) : 0;
+  const mb = (len * w * h * opts.fps * (quality === "high" ? 0.25 : 0.12)) / 8e6 + len * 0.032;
+  const go = () => {
+    if (!track) return;
+    if (!isFinite(start) || !isFinite(end) || end <= start) return setErr("Use times like 0:30 and 2:15, with the end after the start.");
+    if (end > track.duration + 0.5) return setErr(`The track is only ${mmss(track.duration)} long.`);
+    onExport({ start, end: Math.min(end, track.duration), quality });
+  };
   return (
-    <Sheet title="Record" sub="R" small onClose={onClose}>
+    <Sheet title="Make a video" sub="R" small onClose={onClose}>
+      <div className="seg" style={{ marginBottom: 14 }}>
+        <button className={mode === "export" ? "on" : ""} onClick={() => setMode("export")}>Export track</button>
+        <button className={mode === "live" ? "on" : ""} onClick={() => setMode("live")}>Record live</button>
+      </div>
       <div className="grp-t">Size</div>
       {seg<number>([1080, 1440, 2160], opts.height, "height", (v) => (v === 2160 ? "4K" : `${v}p`), (v) => !pro && v > 1080)}
       <div className="grp-t">Shape</div>
       {seg<string>(["16:9", "9:16", "1:1"], opts.aspect, "aspect", (v) => (v === "16:9" ? "16:9 wide" : v === "9:16" ? "9:16 vertical" : "1:1 square"))}
       <div className="grp-t">Frame rate</div>
       {seg<number>([30, 60], opts.fps, "fps", (v) => `${v} fps`)}
-      <div className="toggle on" onClick={() => setOpts({ ...opts, audio: !opts.audio })} style={{ opacity: opts.audio ? 1 : 0.6 }}>
-        <span>Include the audio</span><i style={{ background: opts.audio ? "var(--accent)" : undefined }} />
-      </div>
-      <p className="hint">{w} × {h} · {ext.toUpperCase()}{ext === "webm" ? " (this browser can't write MP4; the desktop app and recent Chrome can)" : ""}. Recording follows the music in real time: start the track, press record, press R again to stop.</p>
-      <div className="row" style={{ justifyContent: "flex-end", marginTop: 8 }}>
-        <button className="btn ghost" onClick={onClose}>Cancel</button>
-        <button className="btn primary" onClick={onStart}><Icon.rec /> Start recording</button>
-      </div>
+      {mode === "export" ? (
+        !track ? (
+          <p className="hint">Open a track first (MP3, WAV, FLAC, M4A). Export renders the whole song, or any part of it, into a video, frame by frame.</p>
+        ) : !exportOk ? (
+          <p className="hint">Exporting needs Chrome, Edge or the desktop app. Use Record live instead.</p>
+        ) : (
+          <>
+            <div className="grp-t">Part of the track</div>
+            <div className="row" style={{ gap: 8 }}>
+              <input className="field num" style={{ width: 90 }} value={from} onChange={(e) => { setFrom(e.target.value); setErr(""); }} onKeyDown={(e) => e.stopPropagation()} aria-label="Start time" />
+              <span style={{ color: "var(--dim)" }}>to</span>
+              <input className="field num" style={{ width: 90 }} value={to} onChange={(e) => { setTo(e.target.value); setErr(""); }} onKeyDown={(e) => e.stopPropagation()} aria-label="End time" />
+              <button className="btn ghost" onClick={() => { setFrom("0:00"); setTo(mmss(track.duration)); }}>Whole track</button>
+            </div>
+            <div className="grp-t" style={{ marginTop: 12 }}>Quality</div>
+            <div className="seg">
+              <button className={quality === "standard" ? "on" : ""} onClick={() => setQuality("standard")}>Standard</button>
+              <button className={quality === "high" ? "on" : ""} onClick={() => setQuality("high")}>High</button>
+            </div>
+            {err && <div className="err">{err}</div>}
+            <p className="hint">{w} × {h} · {opts.fps} fps · MP4 with audio · about {mb < 1000 ? `${Math.max(1, Math.round(mb))} MB` : `${(mb / 1000).toFixed(1)} GB`}. Every frame is rendered, so nothing drops even at 4K. Automation lanes are included. {track.name}</p>
+            <div className="row" style={{ justifyContent: "flex-end", marginTop: 8 }}>
+              <button className="btn ghost" onClick={onClose}>Cancel</button>
+              <button className="btn primary" onClick={go}><Icon.rec /> Export video</button>
+            </div>
+          </>
+        )
+      ) : (
+        <>
+          <div className="toggle on" onClick={() => setOpts({ ...opts, audio: !opts.audio })} style={{ opacity: opts.audio ? 1 : 0.6 }}>
+            <span>Include the audio</span><i style={{ background: opts.audio ? "var(--accent)" : undefined }} />
+          </div>
+          <p className="hint">{w} × {h} · {ext.toUpperCase()}{ext === "webm" ? " (this browser can't write MP4; the desktop app and recent Chrome can)" : ""}. Live recording captures exactly what you play and tweak, in real time. Press R again to stop.</p>
+          <div className="row" style={{ justifyContent: "flex-end", marginTop: 8 }}>
+            <button className="btn ghost" onClick={onClose}>Cancel</button>
+            <button className="btn primary" onClick={onStart}><Icon.rec /> Start recording</button>
+          </div>
+        </>
+      )}
     </Sheet>
+  );
+}
+
+export function ExportProgressSheet({ p, onCancel }: { p: { frame: number; frames: number; eta: number; speed: number } | null; onCancel: () => void }) {
+  const pct = p ? (p.frame / Math.max(1, p.frames)) * 100 : 0;
+  return (
+    <div className="scrim ui">
+      <div className="sheet glass small" role="dialog" aria-label="Exporting video">
+        <div className="sheet-h"><h2>Exporting video</h2><span className="k num">{Math.floor(pct)}%</span></div>
+        <div className="sheet-b">
+          <div style={{ height: 8, borderRadius: 6, background: "rgba(255,255,255,.08)", overflow: "hidden" }}>
+            <div style={{ width: `${pct}%`, height: "100%", background: "linear-gradient(90deg,#f2b544,#ffd98a)", transition: "width .2s" }} />
+          </div>
+          <p className="hint num" style={{ marginTop: 10 }}>
+            {p ? `Frame ${p.frame} of ${p.frames} · ${p.speed.toFixed(2)}× real time · ${p.eta > 0 ? `about ${mmss(p.eta)} left` : "finishing"}` : "Preparing the audio…"}
+          </p>
+          <p className="hint">Keep this window open. The preview behind shows the frames as they're made.</p>
+          <div className="row" style={{ justifyContent: "flex-end" }}><button className="btn" onClick={onCancel}>Cancel export</button></div>
+        </div>
+      </div>
+    </div>
   );
 }
 

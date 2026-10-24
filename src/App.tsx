@@ -9,10 +9,14 @@ import { cloneLook, FACTORY, freshLook, loadPresets, mixLooks, randomizeLook, ra
 import { analyseImage, cropTo, isAudio, isImage, isVideo, loadImage, waveformPeaks, type ImageResult } from "./lib/media";
 import { Midi } from "./lib/midi";
 import { download, Recorder, stamp, type RecordOpts } from "./lib/recorder";
+import { Captions, loadCaptionPrefs, saveCaptionPrefs, type CaptionState } from "./lib/captions";
+import { parseLrc, readTags, type LyricLine } from "./lib/tags";
+import { exportSupported, exportVideo, pickSaveTarget, type ExportProgress } from "./lib/exporter";
+import { decodeAudio } from "./engine/offline";
 import { SCENES, sceneById } from "./scenes";
 import { Icon } from "./ui/Icons";
 import { Panel } from "./ui/Panel";
-import { CoverSheet, HelpSheet, PaletteSheet, PresetSheet, ProSheet, RecordSheet, SceneGrid } from "./ui/Sheets";
+import { CoverSheet, ExportProgressSheet, HelpSheet, PaletteSheet, PresetSheet, ProSheet, RecordSheet, SceneGrid, type ExportRequest } from "./ui/Sheets";
 import { Transport } from "./ui/Transport";
 
 type SheetName = null | "scenes" | "palette" | "presets" | "help" | "record" | "pro" | "cover";
@@ -49,6 +53,7 @@ export default function App() {
   const midi = useMemo(() => new Midi(), []);
   const recorder = useRef<Recorder | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const lrcInput = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const camStream = useRef<MediaStream | null>(null);
   const outWin = useRef<Window | null>(null);
@@ -315,17 +320,24 @@ export default function App() {
   const stopVideo = () => {
     if (videoRef.current) { videoRef.current.pause(); videoRef.current.src = ""; videoRef.current = null; }
   };
-  const syncSrc = useCallback(() => setSrc({ kind: audio.kind, playing: audio.playing, title: audio.trackName || "Nothing playing", sub: audio.kind === "track" ? "Track" : audio.kind === "demo" ? "Built in" : audio.kind === "mic" ? "Live" : audio.kind === "system" ? "Live" : audio.kind === "video" ? "Video" : "" }), [audio]);
+  const syncSrc = useCallback(() => setSrc({ kind: audio.kind, playing: audio.playing, title: audio.trackName || "Nothing playing", sub: audio.kind === "track" ? audio.trackArtist || "Track" : audio.kind === "demo" ? "Built in" : audio.kind === "mic" ? "Live" : audio.kind === "system" ? "Live" : audio.kind === "video" ? "Video" : "" }), [audio]);
 
+  const trackFile = useRef<File | null>(null);
+  const sourceStart = useRef(performance.now());
+  const onTags = useRef<(t: Awaited<ReturnType<typeof readTags>>, name: string) => void>(() => {});
+  const decoded = useRef<{ file: File; buffer: AudioBuffer } | null>(null);
   const loadTrack = useCallback(async (f: File) => {
     stopVideo();
+    trackFile.current = f;
     await audio.loadTrack(f, f.name);
     setPeaks(null);
     const ls = loadLanes(audio.trackName);
     lanesRef.current = ls;
     setLanes(ls);
     syncSrc();
+    sourceStart.current = performance.now();
     waveformPeaks(f).then(setPeaks);
+    readTags(f).then((t) => onTags.current(t, f.name));
   }, [audio, syncSrc]);
 
   const useDemo = useCallback(() => { stopVideo(); audio.playDemo(); setPeaks(null); lanesRef.current = {}; setLanes({}); syncSrc(); }, [audio, syncSrc]);
@@ -416,6 +428,43 @@ export default function App() {
     }
   }, [showPicture, useEmblem, toast]);
 
+  // ------------------------------------------------------------------ titles and lyrics
+  const captions = useMemo(() => new Captions(), []);
+  const [cap, setCap] = useState<CaptionState>(() => loadCaptionPrefs());
+  const capRef = useRef(cap);
+  capRef.current = cap;
+  const [lyrics, setLyrics] = useState<LyricLine[]>([]);
+  const lyricsRef = useRef(lyrics);
+  lyricsRef.current = lyrics;
+  useEffect(() => saveCaptionPrefs(cap), [cap]);
+  useEffect(() => {
+    let raf = 0;
+    const loop = () => {
+      raf = requestAnimationFrame(loop);
+      const e = engineRef.current;
+      if (!e || exportAbort.current) return;
+      const t = audio.kind === "track" ? audio.currentTime : (performance.now() - sourceStart.current) / 1000;
+      captions.update(e, capRef.current, lyricsRef.current, t);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [audio, captions]);
+  // album art, title, artist and lyrics embedded in the audio file
+  onTags.current = (t, name) => {
+    setCap((c) => ({ ...c, title: t.title || name.replace(/\.[^.]+$/, ""), artist: t.artist || "" }));
+    if (t.title) { audio.trackName = t.title; audio.trackArtist = t.artist || ""; setSrc((s) => ({ ...s, title: t.title!, sub: t.artist || "Track" })); }
+    const l = t.lyrics ? parseLrc(t.lyrics) : [];
+    setLyrics(l);
+    if (t.picture) {
+      loadImage(t.picture).then(async (img) => {
+        const r = await analyseImage(img, name, false);
+        setImage(r);
+        showPicture(r.crop, name);
+        toast({ text: `Album art from ${t.title ? `“${t.title}”` : "the file"} · colors taken from it${l.length ? ` · ${l.length} lyric lines` : ""}` });
+      }).catch(() => {});
+    } else if (l.length) toast({ text: `${l.length} synced lyric lines found in the file.` });
+  };
+
   const handleVideo = useCallback((f: File) => {
     const e = engineRef.current;
     if (!e) return;
@@ -465,6 +514,7 @@ export default function App() {
       if (isAudio(f)) loadTrack(f);
       else if (isImage(f)) handleImage(f, f.name);
       else if (isVideo(f)) handleVideo(f);
+      else if (/\.lrc$/i.test(f.name)) f.text().then((txt) => { const l = parseLrc(txt); setLyrics(l); toast({ text: l.length ? `Lyrics loaded · ${l.length} lines. They show over the visuals in time with the track.` : "That .lrc file has no timed lines." }); });
       else if (/\.json$/i.test(f.name)) importPresets(f);
       else toast({ text: `${f.name}: not a track, picture or video.` });
     }
@@ -534,6 +584,49 @@ export default function App() {
     download(blob, `afterimage-${sceneById(lookRef.current.scene).id}-${stamp()}.${ext}`);
     toast({ text: `Saved ${(blob.size / 1e6).toFixed(1)} MB ${ext.toUpperCase()}` });
   }, [toast]);
+  // ------------------------------------------------------------------ offline export
+  const [exporting, setExporting] = useState<{ p: ExportProgress | null } | null>(null);
+  const exportAbort = useRef<AbortController | null>(null);
+  const runExport = useCallback(async (req: ExportRequest) => {
+    const f = trackFile.current, e = engineRef.current;
+    if (!f || !e) return;
+    const name = `${(audio.trackName || "afterimage").replace(/[^\w\- ]+/g, "").trim() || "afterimage"} - ${sceneById(lookRef.current.scene).name}.mp4`;
+    const target = await pickSaveTarget(name); // first, while the click still counts as a user gesture
+    if (!target) return;
+    setSheet(null);
+    setExporting({ p: null });
+    if (audio.playing) audio.toggle();
+    const ac = (exportAbort.current = new AbortController());
+    try {
+      if (decoded.current?.file !== f) decoded.current = { file: f, buffer: await decodeAudio(f) };
+      const base = lookRef.current;
+      const L = lanesRef.current;
+      const res = await exportVideo(e, decoded.current.buffer, { ...recOpts, audio: true, ...req }, target, {
+        signal: ac.signal,
+        beforeFrame: (t) => {
+          let l = base;
+          for (const lane of Object.values(L)) { const v = sample(lane, t); if (v != null) l = applyTarget(l, lane.target, v); }
+          beforeExportFrame.current?.(t, l);
+          if (l !== e.look) e.setLook(l);
+        },
+        onProgress: (p) => setExporting({ p }),
+      });
+      if (res.blob) download(res.blob, target.name);
+      toast({ text: `Exported ${target.name} · ${(res.bytes / 1e6).toFixed(1)} MB`, ms: 6000 });
+      engineRef.current?.setLook(lookRef.current);
+    } catch (err) {
+      if ((err as DOMException)?.name === "AbortError") toast({ text: "Export cancelled." });
+      else toast({ text: `Export failed: ${(err as Error).message}`, ms: 9000 });
+      engineRef.current?.setLook(lookRef.current);
+    } finally {
+      setExporting(null);
+      exportAbort.current = null;
+    }
+  }, [audio, recOpts, toast]);
+  /** Extra per-frame work during export (titles, lyrics, autopilot); set by those features. */
+  const beforeExportFrame = useRef<((t: number, look: Look) => void) | null>(null);
+  beforeExportFrame.current = (t) => { if (engineRef.current) captions.update(engineRef.current, capRef.current, lyricsRef.current, t); };
+
   useEffect(() => {
     if (!recording) return;
     const t = setInterval(() => setRecTime(recorder.current?.elapsed ?? 0), 250);
@@ -556,6 +649,7 @@ export default function App() {
   keyRef.current = (e: KeyboardEvent) => {
     const tag = (e.target as HTMLElement)?.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA") return;
+    if (exportAbort.current) return; // keys are ignored while a video is being exported
     const mod = e.metaKey || e.ctrlKey;
     const k = e.key;
     if (mod && k.toLowerCase() === "z") { e.preventDefault(); undo(); return; }
@@ -729,6 +823,7 @@ export default function App() {
         clearLanes={() => { lanesRef.current = {}; setLanes({}); saveLanes(audio.trackName, {}); }}
         laneCount={Object.keys(lanes).length}
         midiOn={learn} toggleLearn={toggleLearn}
+        text={{ st: cap, set: (q) => setCap((c) => ({ ...c, ...q })), lyricCount: lyrics.length, onLyrics: () => lrcInput.current?.click(), clearLyrics: () => setLyrics([]) }}
       />
 
       <Transport
@@ -761,7 +856,8 @@ export default function App() {
       {sheet === "palette" && <PaletteSheet current={look.palette} photo={photoPal} onPick={pickPalette} onClose={() => setSheet(null)} />}
       {sheet === "presets" && <PresetSheet presets={presets} current={curPreset} morph={morph} setMorph={setMorph} onRecall={(n) => { recallPreset(n); }} onSave={savePreset} onClear={(n) => { const p = { ...presets }; delete p[n]; persist(p); }} onExport={exportPresets} onImport={importPresets} onClose={() => setSheet(null)} />}
       {sheet === "help" && <HelpSheet onClose={() => setSheet(null)} />}
-      {sheet === "record" && <RecordSheet pro={pro} opts={recOpts} setOpts={setRecOpts} onStart={startRecording} onClose={() => setSheet(null)} onPro={() => gatePro("1440p and 4K recording are part of Pro.")} />}
+      {sheet === "record" && <RecordSheet pro={pro} opts={recOpts} setOpts={setRecOpts} onStart={startRecording} onExport={runExport} onClose={() => setSheet(null)} onPro={() => gatePro("1440p and 4K recording are part of Pro.")} track={src.kind === "track" && trackFile.current ? { name: audio.trackName, duration: audio.duration || 0 } : null} exportOk={exportSupported()} />}
+      {exporting && <ExportProgressSheet p={exporting.p} onCancel={() => exportAbort.current?.abort()} />}
       {sheet === "pro" && <ProSheet license={license} reason={proReason} onActivate={(k) => { storeLicense(k); setLicense(verifyLicense(k)); setPreview(null); toast({ text: "Pro unlocked. Enjoy." }); setSheet(null); }} onDeactivate={() => { clearLicense(); setLicense(null); setSheet(null); }} onClose={() => setSheet(null)} />}
       {sheet === "cover" && image && (
         <CoverSheet full={image.full} box={image.box} found={image.found} confidence={image.confidence}
@@ -771,7 +867,8 @@ export default function App() {
           onClose={() => setSheet(null)} />
       )}
 
-      <input ref={fileInput} type="file" hidden multiple accept="audio/*,image/*,video/*,.json" onChange={(e) => { if (e.target.files) handleFiles(e.target.files); e.target.value = ""; }} />
+      <input ref={lrcInput} type="file" hidden accept=".lrc,text/plain" onChange={(e) => { if (e.target.files) handleFiles(e.target.files); e.target.value = ""; }} />
+      <input ref={fileInput} type="file" hidden multiple accept="audio/*,image/*,video/*,.json,.lrc" onChange={(e) => { if (e.target.files) handleFiles(e.target.files); e.target.value = ""; }} />
     </div>
   );
 }

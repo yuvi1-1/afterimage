@@ -1,4 +1,5 @@
 import type { Emblem } from "../engine/engine";
+import type { CaptionState } from "../lib/captions";
 import { GLOBALS, LENS_STYLES, type Def, type Look } from "../engine/params";
 import type { Scene } from "../scenes/types";
 import { Icon } from "./Icons";
@@ -29,6 +30,7 @@ type Props = {
   laneCount: number;
   midiOn: boolean;
   toggleLearn: () => void;
+  text: { st: CaptionState; set: (p: Partial<CaptionState>) => void; lyricCount: number; onLyrics: () => void; clearLyrics: () => void };
 };
 
 export function Panel(p: Props) {
@@ -110,6 +112,50 @@ export function Panel(p: Props) {
             <Toggle label="Invert" on={p.emblem.invert} onChange={(v) => p.setEmblem({ invert: v })} />
           </div>
         )}
+
+        <div className="sec">
+          <div className="sec-h"><span>Text</span></div>
+          <div className="seg">
+            {(["off", "corner", "lower", "center"] as const).map((m) => (
+              <button key={m} className={p.text.st.titleMode === m ? "on" : ""} onClick={() => p.text.set({ titleMode: m })}>{m === "off" ? "no title" : m === "lower" ? "lower third" : m}</button>
+            ))}
+          </div>
+          {p.text.st.titleMode !== "off" && (
+            <>
+              <input className="field" style={{ height: 32, marginBottom: 6 }} placeholder="Title" value={p.text.st.title} onChange={(e) => p.text.set({ title: e.target.value })} onKeyDown={(e) => e.stopPropagation()} aria-label="Title" />
+              <input className="field" style={{ height: 32, marginBottom: 8 }} placeholder="Artist" value={p.text.st.artist} onChange={(e) => p.text.set({ artist: e.target.value })} onKeyDown={(e) => e.stopPropagation()} aria-label="Artist" />
+              <div className="seg">
+                <button className={p.text.st.titleShow === "intro" ? "on" : ""} onClick={() => p.text.set({ titleShow: "intro" })}>first 9 s</button>
+                <button className={p.text.st.titleShow === "always" ? "on" : ""} onClick={() => p.text.set({ titleShow: "always" })}>always</button>
+              </div>
+            </>
+          )}
+          <div className="seg">
+            {(["grotesk", "serif", "mono", "condensed"] as const).map((f) => (
+              <button key={f} className={p.text.st.font === f ? "on" : ""} onClick={() => p.text.set({ font: f })}>{f}</button>
+            ))}
+          </div>
+          <div className="row" style={{ justifyContent: "space-between", margin: "4px 0" }}>
+            <span style={{ color: "var(--dim)", fontSize: 12.5 }}>{p.text.lyricCount ? `Lyrics · ${p.text.lyricCount} lines` : "Synced lyrics (.lrc)"}</span>
+            <span className="row">
+              {p.text.lyricCount > 0 && <button className="btn ghost" style={{ height: 26 }} onClick={p.text.clearLyrics}>remove</button>}
+              <button className="btn" style={{ height: 26 }} onClick={p.text.onLyrics}>{p.text.lyricCount ? "replace" : "add"}</button>
+            </span>
+          </div>
+          {p.text.lyricCount > 0 && (
+            <>
+              <Toggle label="Show lyrics" on={p.text.st.lyricsOn} onChange={(v) => p.text.set({ lyricsOn: v })} />
+              <div className="seg">
+                <button className={p.text.st.lyricPos === "bottom" ? "on" : ""} onClick={() => p.text.set({ lyricPos: "bottom" })}>bottom</button>
+                <button className={p.text.st.lyricPos === "center" ? "on" : ""} onClick={() => p.text.set({ lyricPos: "center" })}>center</button>
+              </div>
+              <Slider label="lyric timing" value={p.text.st.lyricOffset} min={-2} max={2} def={0} format={(v) => `${v > 0 ? "+" : ""}${v.toFixed(1)} s`} onChange={(v) => p.text.set({ lyricOffset: Math.round(v * 10) / 10 })} />
+            </>
+          )}
+          <Slider label="text pulse" value={p.text.st.pulse * 100} def={40} onChange={(v) => p.text.set({ pulse: v / 100 })} />
+          <Toggle label="Tint text with the palette" on={p.text.st.tint} onChange={(v) => p.text.set({ tint: v })} />
+          <div className="hint">Titles fill in from the song's tags. Drop an .lrc file for synced lyrics. Text appears in recordings and exports.</div>
+        </div>
 
         <div className="sec">
           <div className="sec-h"><span>Automation</span>{p.laneCount > 0 && <button onClick={p.clearLanes}>clear {p.laneCount}</button>}</div>

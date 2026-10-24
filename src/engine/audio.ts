@@ -1,6 +1,9 @@
 /** Audio input + analysis: bands, kick and accent detection, tempo, FFT / waveform / spectrogram data. */
 
 export type Bands = { bass: number; mid: number; high: number; level: number; kick: number; accent: number; bpm: number; beatPhase: number; beats: number };
+/** One frame of analysis computed offline (same shapes the live analysers produce). */
+export type ExtAudioFrame = { freq: Uint8Array; time: Float32Array; timeL: Float32Array; timeR: Float32Array; sampleRate: number };
+
 export type SourceKind = "none" | "track" | "mic" | "system" | "demo" | "video";
 
 const FFT_BINS = 512;
@@ -20,6 +23,7 @@ export class AudioEngine {
   liveNode: MediaStreamAudioSourceNode | null = null;
   kind: SourceKind = "none";
   trackName = "";
+  trackArtist = "";
   freq = new Uint8Array(1024);
   time = new Float32Array(2048);
   timeL = new Float32Array(1024);
@@ -97,6 +101,7 @@ export class AudioEngine {
     if (this.el!.src) URL.revokeObjectURL(this.el!.src);
     this.el!.src = URL.createObjectURL(file);
     this.trackName = name.replace(/\.[^.]+$/, "");
+    this.trackArtist = "";
     this.kind = "track";
     try { await this.el!.play(); } catch { /* user can press play */ }
     this.onChange?.();
@@ -173,17 +178,26 @@ export class AudioEngine {
   }
 
   /** gain: 0.25..4, decay: 0..1 (1 = long hold) */
-  update(dt: number, now: number, gain: number, decay: number) {
+  update(dt: number, now: number, gain: number, decay: number, ext?: ExtAudioFrame) {
     const B = this.bands;
     const release = 0.3 - decay * 0.26;
     let raw: number[];
-    const live = !!this.ctx && this.playing;
+    const live = !!ext || (!!this.ctx && this.playing);
     if (live) {
-      this.analyser.getByteFrequencyData(this.freq);
-      this.analyser.getFloatTimeDomainData(this.time);
-      this.analyserL.getFloatTimeDomainData(this.timeL);
-      this.analyserR.getFloatTimeDomainData(this.timeR);
-      const binHz = this.ctx!.sampleRate / this.analyser.fftSize;
+      let binHz: number;
+      if (ext) {
+        this.freq.set(ext.freq);
+        this.time.set(ext.time);
+        this.timeL.set(ext.timeL);
+        this.timeR.set(ext.timeR);
+        binHz = ext.sampleRate / 2048;
+      } else {
+        this.analyser.getByteFrequencyData(this.freq);
+        this.analyser.getFloatTimeDomainData(this.time);
+        this.analyserL.getFloatTimeDomainData(this.timeL);
+        this.analyserR.getFloatTimeDomainData(this.timeR);
+        binHz = this.ctx!.sampleRate / this.analyser.fftSize;
+      }
       raw = [this.band(25, 140, binHz), this.band(140, 2000, binHz) * 1.35, this.band(2000, 10000, binHz) * 2.1];
       // log-spaced FFT texture
       for (let i = 0; i < FFT_BINS; i++) {

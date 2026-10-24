@@ -1,6 +1,6 @@
 import { SCENES, sceneById } from "../scenes";
 import type { Scene, Sim } from "../scenes/types";
-import { AudioEngine, SPEC } from "./audio";
+import { AudioEngine, SPEC, type ExtAudioFrame } from "./audio";
 import { freeFBO, makeFBO, Pair, program, texParams, type FBO, type Program } from "./gl";
 import { FEEDBACK, FINAL, LUMA, PRELUDE, SCENE_MAIN } from "./glsl";
 import { hexToRgb, PALETTES } from "./palettes";
@@ -31,6 +31,9 @@ export class Engine {
   lumaFBO: FBO;
   imgTex: WebGLTexture;
   emblemTex: WebGLTexture;
+  capTex: WebGLTexture;
+  /** Title / lyric overlay (see lib/captions.ts) */
+  caption = { on: false, alpha: 1, pulse: 0.4, tint: 0 };
   fftTex: WebGLTexture;
   waveTex: WebGLTexture;
   specTex: WebGLTexture;
@@ -88,6 +91,7 @@ export class Engine {
     this.specTex = tex(SPEC.bins, SPEC.rows, "R", gl.REPEAT);
     this.imgTex = tex(1, 1, "RGBA", gl.MIRRORED_REPEAT, true);
     this.emblemTex = tex(1, 1, "RGBA", gl.CLAMP_TO_EDGE);
+    this.capTex = tex(1, 1, "RGBA", gl.CLAMP_TO_EDGE);
     gl.bindTexture(gl.TEXTURE_2D, this.imgTex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([20, 20, 28, 255]));
     canvas.addEventListener("webglcontextlost", (e) => { e.preventDefault(); setTimeout(() => location.reload(), 500); });
@@ -173,6 +177,16 @@ export class Engine {
     this.emblem.on = true;
   }
 
+  setCaption(src: (TexImageSource & { width: number; height: number }) | null) {
+    if (!src) { this.caption.on = false; return; }
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, this.capTex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, src);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    this.caption.on = true;
+  }
+
   // ---------------------------------------------------------------- sizing
   resize(force = false) {
     const c = this.canvas;
@@ -202,6 +216,8 @@ export class Engine {
 
   // ---------------------------------------------------------------- loop
   start() {
+    cancelAnimationFrame(this.raf);
+    this.last = performance.now();
     const loop = (now: number) => {
       this.raf = requestAnimationFrame(loop);
       this.frame(now);
@@ -249,10 +265,18 @@ export class Engine {
   }
 
   frame(now: number) {
-    const gl = this.gl;
     const dt = Math.min(0.1, Math.max(0, (now - this.last) / 1000));
     this.last = now;
     if (!this.look) return;
+    this.renderFrame(dt, now);
+  }
+
+  /** Offline rendering (video export) drives the engine itself, one fixed step at a time. */
+  offline = false;
+
+  /** Render one frame. `ext` supplies pre-analysed audio (offline export) instead of the live analyser. */
+  renderFrame(dt: number, now: number, ext?: ExtAudioFrame) {
+    const gl = this.gl;
     this.resize();
     // smooth params
     const k = 1 - Math.exp(-dt * 9);
@@ -269,7 +293,7 @@ export class Engine {
     stops.forEach((h, i) => { const c = hexToRgb(h); for (let j = 0; j < 3; j++) this.palCur[i][j] += (c[j] - this.palCur[i][j]) * pk; });
     // audio
     const gain = Math.pow(4, (this.cur.gain - 50) / 50);
-    this.audio.update(dt, now, gain, this.cur.decay / 100);
+    this.audio.update(dt, now, gain, this.cur.decay / 100, ext);
     const b = this.audio.bands;
     const speed = this.scene.sliders[0]?.label === "speed" ? 0.15 + (this.curScene[0] / 50) * 0.85 : 1;
     this.time += dt;
@@ -368,6 +392,11 @@ export class Engine {
     gl.uniform1f(F.u.uLensStyle, Math.round(this.cur.lensStyle));
     this.emblemUniforms(F, this.emblem.on && this.emblem.clean);
     gl.uniform1f(F.u.uEmblemClean, 1);
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, this.capTex); gl.uniform1i(F.u.uCap, 2);
+    gl.uniform1f(F.u.uCapOn, this.caption.on ? 1 : 0);
+    gl.uniform1f(F.u.uCapAlpha, this.caption.alpha);
+    gl.uniform1f(F.u.uCapPulse, this.caption.pulse);
+    gl.uniform1f(F.u.uCapTint, this.caption.tint);
     gl.uniform3fv(F.u.uPal, this.palCur.flat());
     this.draw();
     if (this.grab) { const g = this.grab; this.grab = null; g(this.canvas); }
@@ -378,7 +407,7 @@ export class Engine {
       this.fps = this.fpsN / this.fpsAcc;
       this.fpsAcc = 0;
       this.fpsN = 0;
-      if (!this.fixedSize || true) {
+      if (!this.offline) {
         if (this.fps < 42) { this.slow++; this.fast = 0; } else if (this.fps > 57) { this.fast++; this.slow = 0; } else { this.slow = this.fast = 0; }
         if (this.slow >= 3 && this.renderScale > 0.4) { this.renderScale *= 0.82; this.slow = 0; this.resize(true); }
         if (this.fast >= 8 && this.renderScale < 1) { this.renderScale = Math.min(1, this.renderScale * 1.15); this.fast = 0; this.resize(true); }

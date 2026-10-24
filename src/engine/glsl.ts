@@ -92,8 +92,9 @@ void main(){
 /** Final composite: frame transforms, lens materials, bloom, exposure, color, vignette. */
 export const FINAL = `#version 300 es
 precision highp float;
-uniform sampler2D uAcc, uEmblem;
+uniform sampler2D uAcc, uEmblem, uCap;
 uniform vec2 uRes;
+uniform float uCapOn, uCapAlpha, uCapPulse, uCapTint;
 uniform float uTime, uBass, uMid, uHigh, uKick, uAccent, uHeat, uBright, uExposure, uHue, uVig, uChaos;
 uniform float uSym, uTiles, uTwist, uSlice, uSpin, uLens, uLensStyle;
 uniform float uEmblemOn, uEmblemClean, uEmblemSize, uEmblemOpacity, uEmblemPulse, uEmblemSpin, uEmblemAspect, uEmblemWhite, uEmblemInvert;
@@ -171,6 +172,12 @@ void main(){
       if(uEmblemInvert > .5) ec = 1. - ec;
       c = mix(c, ec, em.a*uEmblemOpacity);
     }
+  }
+  if(uCapOn > .5){ // titles and lyrics, drawn crisp above every effect
+    vec2 cuv = (uv - .5)/(1. + uKick*uCapPulse*.035) + .5;
+    vec4 t = texture(uCap, cuv);
+    vec3 tc = mix(t.rgb, t.rgb*mix(vec3(1.), uPal[4]*1.15 + .1, uCapTint), step(.5, t.r));
+    c = mix(c, tc, t.a*uCapAlpha);
   }
   c += (h21(gl_FragCoord.xy + fract(uTime)*91.) - .5)/255.;
   fragColor = vec4(c, 1.);
