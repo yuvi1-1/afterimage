@@ -54,7 +54,8 @@ export async function createOrder(req) {
   } catch (e) {
     const status = e?.statusCode === 401 ? 401 : 500;
     const msg = e?.error?.description || e?.message || "Razorpay request failed";
-    console.error("create-order failed:", status, msg);
+    // Private diagnostics (Netlify → Logs → Functions). Never logs the secret itself.
+    console.error("create-order failed:", status, msg, { keyId, secretLength: keySecret.length, secretLooksLikeKeyId: keySecret.startsWith("rzp_") });
     const hint = status === 401
       ? `Payment provider rejected the server's credentials (key ${keyId.slice(0, 12)}…, ${keyId.startsWith("rzp_live_") ? "live" : "test"} mode). Check that RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in Netlify are a matching pair, then redeploy.`
       : `Couldn't start the payment: ${msg}`;
