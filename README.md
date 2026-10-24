@@ -113,16 +113,36 @@ image ──► cover detector (worker) ──► crop + 5-colour palette
 | 1440p and 4K recording | | ✓ |
 | Output window, MIDI mapping | | ✓ |
 
-Licenses are offline Ed25519 keys, so there's no server or account to run.
+Licenses are offline Ed25519 keys: the app checks them itself, with no account or login.
+
+### Checkout (Razorpay)
+
+Buying happens inside the app. The buyer enters their email and pays in the Razorpay window, and Pro unlocks immediately.
+
+```
+Unlock → email → POST /api/create-order ──► Razorpay order (price set on the server)
+       → Razorpay Checkout modal → payment
+       → POST /api/verify-payment ──► HMAC-SHA256(order_id|payment_id, KEY_SECRET) check
+       ◄── signed AFTR-… license key → stored on the device
+```
+
+- `server/payments.mjs` holds both endpoints, written as Web `Request → Response` handlers.
+- `netlify/functions/` serves them at `/api/*` on Netlify. `npm run api` serves them locally on :8787, and `npm run dev` proxies `/api` there.
+- The key secret and license secret stay on the server. The browser only gets the public key id.
+
+**Deploy the API** (Netlify, free tier):
+
+1. Import this repo at app.netlify.com. The build settings come from `netlify.toml`.
+2. In Site settings → Environment variables, add `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `AFTERIMAGE_SECRET`, `PRO_PRICE_PAISE` (e.g. `99900`) and `VITE_RAZORPAY_KEY_ID`. See `.env.example`.
+3. The Netlify site works on its own: same-origin API, checkout ready.
+4. For the GitHub Pages build and the desktop apps, add repository variables `RAZORPAY_KEY_ID` (public key id) and `API_BASE` (your Netlify URL), then rebuild.
+
+If no API is configured, the Unlock button falls back to `VITE_BUY_URL` (for example a Razorpay Payment Page). Keys can also be made by hand:
 
 ```bash
 npm run keygen                                           # once: prints a keypair
-# put PUBLIC_KEY in src/lib/license.ts, keep the secret key private
-VITE_BUY_URL=https://buy.stripe.com/... VITE_PRICE='$24' npm run build
 AFTERIMAGE_SECRET=<secret> npm run sign buyer@email.com  # prints AFTR-… for the buyer
 ```
-
-Any checkout that can run a webhook (Stripe, Lemon Squeezy, Gumroad) can call the same signing code to send keys automatically.
 
 ## macOS note
 

@@ -4,7 +4,7 @@ import nacl from "tweetnacl";
 export const PUBLIC_KEY = "uLTaW8QVL7fPN2ia-tUREPgOAloh1fv4UHEkMb8BuXA";
 /** Where the "Get Pro" button sends people (a Stripe Payment Link, Lemon Squeezy or Gumroad checkout). */
 export const BUY_URL = (import.meta.env.VITE_BUY_URL as string | undefined) || "https://buy.stripe.com/";
-export const PRICE = (import.meta.env.VITE_PRICE as string | undefined) || "$24";
+export const PRICE = (import.meta.env.VITE_PRICE as string | undefined) || "₹999";
 
 export type License = { email: string; tier: string; issued: string };
 

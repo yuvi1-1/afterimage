@@ -4,3 +4,4 @@ release
 *.log
 .env*
 *.tsbuildinfo
+!.env.example

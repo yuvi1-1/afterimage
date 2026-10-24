@@ -15,9 +15,11 @@
     "desktop": "npm run build && electron .",
     "dist": "npm run build && electron-builder",
     "keygen": "node scripts/license.mjs keygen",
-    "sign": "node scripts/license.mjs sign"
+    "sign": "node scripts/license.mjs sign",
+    "api": "node scripts/dev-api.mjs"
   },
   "dependencies": {
+    "razorpay": "^2.9.8",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tweetnacl": "^1.0.3"

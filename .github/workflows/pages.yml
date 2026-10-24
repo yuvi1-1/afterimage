@@ -17,7 +17,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 20, cache: npm }
       - run: npm ci && npm run build
-        env: { VITE_BUY_URL: "${{ vars.BUY_URL }}", VITE_PRICE: "${{ vars.PRICE }}" }
+        env: { VITE_BUY_URL: "${{ vars.BUY_URL }}", VITE_PRICE: "${{ vars.PRICE }}", VITE_RAZORPAY_KEY_ID: "${{ vars.RAZORPAY_KEY_ID }}", VITE_API_BASE: "${{ vars.API_BASE }}" }
       - uses: actions/upload-pages-artifact@v3
         with: { path: dist }
       - id: deploy

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { PALETTES } from "../engine/palettes";
 import type { Look } from "../engine/params";
+import { buyPro, checkoutAvailable } from "../lib/checkout";
 import { BUY_URL, PRICE, verifyLicense, type License } from "../lib/license";
 import type { Preset } from "../lib/looks";
 import { recordSize, type RecordOpts, pickMime } from "../lib/recorder";
@@ -171,6 +172,24 @@ export function RecordSheet({ pro, opts, setOpts, onStart, onClose, onPro }: { p
 export function ProSheet({ license, reason, onActivate, onDeactivate, onClose }: { license: License | null; reason?: string; onActivate: (key: string) => void; onDeactivate: () => void; onClose: () => void }) {
   const [key, setKey] = useState("");
   const [err, setErr] = useState("");
+  const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState("");
+  const pay = async () => {
+    setErr(""); setNote("");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) return setErr("Enter your email. Your license key is tied to it.");
+    setBusy(true);
+    try {
+      const r = await buyPro(email.trim());
+      if (r.status === "cancelled") setNote("Payment cancelled. Nothing was charged.");
+      else if (r.license && verifyLicense(r.license)) onActivate(r.license);
+      else setNote(r.message || "Payment received. Your license key will be emailed to you shortly.");
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <Sheet title={license ? "Afterimage Pro" : "Unlock Afterimage Pro"} small onClose={onClose}>
       {license ? (
@@ -188,12 +207,23 @@ export function ProSheet({ license, reason, onActivate, onDeactivate, onClose }:
             <li>MIDI controller mapping</li>
             <li>Web and desktop app, one license, every update</li>
           </ul>
-          <div className="row" style={{ marginBottom: 18 }}>
-            <a className="btn primary" href={BUY_URL} target="_blank" rel="noreferrer">Buy Pro · {PRICE} once</a>
-          </div>
+          {checkoutAvailable ? (
+            <div style={{ marginBottom: 18 }}>
+              <input className="field" type="email" placeholder="you@example.com" value={email} onChange={(e) => { setEmail(e.target.value); setErr(""); }} onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") pay(); }} aria-label="Email for your license" />
+              <div className="row" style={{ marginTop: 10, justifyContent: "space-between" }}>
+                <span className="hint" style={{ margin: 0 }}>Pay securely with Razorpay. Pro unlocks instantly.</span>
+                <button className="btn primary" disabled={busy} onClick={pay}>{busy ? "Opening…" : `Buy Pro · ${PRICE} once`}</button>
+              </div>
+              {note && <div className="hint" style={{ color: "var(--text)" }}>{note}</div>}
+            </div>
+          ) : (
+            <div className="row" style={{ marginBottom: 18 }}>
+              <a className="btn primary" href={BUY_URL} target="_blank" rel="noreferrer">Buy Pro · {PRICE} once</a>
+            </div>
+          )}
+          {err && <div className="err" style={{ marginBottom: 10 }}>{err}</div>}
           <div className="grp-t">Have a key?</div>
           <textarea className="field" placeholder="AFTR-…" value={key} onChange={(e) => { setKey(e.target.value); setErr(""); }} onKeyDown={(e) => e.stopPropagation()} />
-          {err && <div className="err">{err}</div>}
           <div className="row" style={{ justifyContent: "flex-end", marginTop: 10 }}>
             <button className="btn" onClick={() => (verifyLicense(key) ? onActivate(key) : setErr("That key isn't valid. Paste the whole key, starting with AFTR-."))}>Activate</button>
           </div>

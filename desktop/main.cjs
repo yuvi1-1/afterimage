@@ -33,6 +33,8 @@ function createWindow() {
     if (frameName === "afterimage-output" || url === "about:blank" || url === "") {
       return { action: "allow", overrideBrowserWindowOptions: { width: 1280, height: 720, backgroundColor: "#000", title: "Afterimage output", autoHideMenuBar: true } };
     }
+    // Razorpay opens bank / UPI pages in a popup during checkout.
+    if (/^https:\/\/([a-z0-9-]+\.)*razorpay\.com\//.test(url)) return { action: "allow", overrideBrowserWindowOptions: { width: 520, height: 720, autoHideMenuBar: true } };
     if (/^https?:/.test(url)) shell.openExternal(url);
     return { action: "deny" };
   });
