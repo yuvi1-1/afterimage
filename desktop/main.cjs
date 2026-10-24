@@ -7,6 +7,8 @@ const { pathToFileURL } = require("url");
 // System audio capture on macOS 13+ (ScreenCaptureKit loopback). Windows loopback works out of the box.
 app.commandLine.appendSwitch("enable-features", "MacLoopbackAudioForScreenShare,MacSckSystemAudioLoopbackOverride");
 
+app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
+
 protocol.registerSchemesAsPrivileged([
   { scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } },
 ]);

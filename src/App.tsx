@@ -19,6 +19,8 @@ type SheetName = null | "scenes" | "palette" | "presets" | "help" | "record" | "
 type Toast = { id: number; text: string; chips?: { label: string; run: () => void }[]; ms?: number };
 
 const LOOK_KEY = "afterimage.look.v1";
+const IS_DESKTOP = typeof navigator !== "undefined" && /Electron/.test(navigator.userAgent);
+const IS_MAC_APP = IS_DESKTOP && /Mac/.test(navigator.platform);
 const PREVIEW_MS = 20000;
 
 function initialLook(): Look {
@@ -327,17 +329,45 @@ export default function App() {
   }, [audio, syncSrc]);
 
   const useDemo = useCallback(() => { stopVideo(); audio.playDemo(); setPeaks(null); lanesRef.current = {}; setLanes({}); syncSrc(); }, [audio, syncSrc]);
-  const useLive = useCallback(async (kind: "mic" | "system") => {
+  const useLive = useCallback(async (kind: "mic" | "system", quiet = false): Promise<boolean> => {
     try {
       stopVideo();
       await audio.live(kind);
       syncSrc();
-      if (kind === "system") toast({ text: "Listening to your computer. Play something in Spotify, YouTube or any app." });
+      if (!quiet) toast({ text: kind === "system" ? "Listening to your computer. Play something in Spotify, YouTube or any app." : "Listening to your audio input." });
+      // watchdog: a granted-but-silent capture usually means a missing OS permission
+      if (kind === "system") {
+        let heard = 0;
+        const t0 = Date.now();
+        const iv = setInterval(() => {
+          if (audio.kind !== "system") return clearInterval(iv);
+          heard = Math.max(heard, audio.bands.level);
+          if (Date.now() - t0 > 12000) {
+            clearInterval(iv);
+            if (heard < 0.02) toast({ text: IS_MAC_APP ? "Not hearing anything yet. Play some music. If it still doesn't react, allow Afterimage under System Settings → Privacy & Security → Screen & System Audio Recording, then reopen it." : "Not hearing anything yet. Play some music, or choose Input to use the microphone.", ms: 12000, chips: [{ label: "Use microphone", run: () => { useLiveRef.current("mic"); } }] });
+          }
+        }, 300);
+      }
+      return true;
     } catch (e) {
       const m = String((e as Error).message || e);
-      toast({ text: m === "noaudio" ? "No sound was shared. Pick a screen or tab and tick “Share audio”." : kind === "mic" ? "Microphone access was blocked." : "Sharing was cancelled." });
+      if (!quiet) toast({ text: m === "noaudio" ? "No sound was shared. Pick a screen or tab and tick “Share audio”." : kind === "mic" ? "Microphone access was blocked." : "Sharing was cancelled." });
+      return false;
     }
   }, [audio, syncSrc, toast]);
+  const useLiveRef = useRef(useLive);
+  useLiveRef.current = useLive;
+
+  // Desktop app: start listening to whatever the computer is playing, straight away.
+  useEffect(() => {
+    if (!IS_DESKTOP) return;
+    const t = setTimeout(async () => {
+      if (audio.kind !== "none") return;
+      if (await useLiveRef.current("system", true)) toast({ text: "Listening to your computer. Play any music and the visuals follow it." });
+      else if (await useLiveRef.current("mic", true)) toast({ text: "Listening through the microphone. Allow screen & system audio recording to capture your computer's sound directly." });
+    }, 600);
+    return () => clearTimeout(t);
+  }, [audio, toast]);
 
   const showPicture = useCallback((c: HTMLCanvasElement, name: string) => {
     const e = engineRef.current;
