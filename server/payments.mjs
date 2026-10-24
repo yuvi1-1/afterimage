@@ -5,7 +5,8 @@ import crypto from "node:crypto";
 import Razorpay from "razorpay";
 import { signLicense } from "./license.mjs";
 
-const env = (k, d) => process.env[k] ?? d;
+// Trim: pasted dashboard values often carry a trailing space or newline, which Razorpay rejects as bad credentials.
+const env = (k, d) => { const v = process.env[k]; return v == null || v.trim() === "" ? d : v.trim().replace(/^["']|["']$/g, ""); };
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function cors(req) {
@@ -54,7 +55,10 @@ export async function createOrder(req) {
     const status = e?.statusCode === 401 ? 401 : 500;
     const msg = e?.error?.description || e?.message || "Razorpay request failed";
     console.error("create-order failed:", status, msg);
-    return json(req, status, { error: status === 401 ? "Payment provider rejected the server's credentials." : `Couldn't start the payment: ${msg}` });
+    const hint = status === 401
+      ? `Payment provider rejected the server's credentials (key ${keyId.slice(0, 12)}…, ${keyId.startsWith("rzp_live_") ? "live" : "test"} mode). Check that RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in Netlify are a matching pair, then redeploy.`
+      : `Couldn't start the payment: ${msg}`;
+    return json(req, status, { error: hint });
   }
 }
 
