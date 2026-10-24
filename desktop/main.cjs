@@ -1,6 +1,7 @@
 // Afterimage desktop shell. Serves the same web build from a private app:// origin so
 // workers, MIDI, camera, microphone and system-audio capture all behave like a secure site.
-const { app, BrowserWindow, protocol, net, session, desktopCapturer, shell, Menu } = require("electron");
+const { app, BrowserWindow, protocol, net, session, desktopCapturer, shell, Menu, ipcMain } = require("electron");
+const nowPlaying = require("./nowplaying.cjs");
 const path = require("path");
 const { pathToFileURL } = require("url");
 
@@ -26,7 +27,7 @@ function createWindow() {
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     trafficLightPosition: { x: 14, y: 14 },
     autoHideMenuBar: true,
-    webPreferences: { contextIsolation: true, sandbox: true, backgroundThrottling: false },
+    webPreferences: { contextIsolation: true, sandbox: true, backgroundThrottling: false, preload: path.join(__dirname, "preload.cjs") },
   });
   win.loadURL("app://afterimage/index.html");
   win.webContents.setWindowOpenHandler(({ url, frameName }) => {
@@ -42,6 +43,9 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  ipcMain.handle("np:start", () => { nowPlaying.start(); return nowPlaying.supported; });
+  ipcMain.handle("np:stop", () => nowPlaying.stop());
+  ipcMain.handle("np:get", () => nowPlaying.get());
   protocol.handle("app", (req) => {
     const u = new URL(req.url);
     let p = path.normalize(path.join(DIST, decodeURIComponent(u.pathname)));
@@ -78,4 +82,5 @@ app.whenReady().then(() => {
   app.on("activate", () => BrowserWindow.getAllWindows().length === 0 && createWindow());
 });
 
-app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
+app.on("window-all-closed", () => { nowPlaying.stop(); if (process.platform !== "darwin") app.quit(); });
+app.on("before-quit", () => nowPlaying.stop());

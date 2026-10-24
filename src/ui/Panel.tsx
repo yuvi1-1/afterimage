@@ -32,6 +32,7 @@ type Props = {
   midiOn: boolean;
   toggleLearn: () => void;
   quality: { value: number; set: (q: number) => void };
+  follow: { on: boolean; set: (v: boolean) => void; np: { app?: string; title?: string; artist?: string } | null } | null;
   cursor: { mode: number; amount: number; set: (c: Partial<{ mode: number; amount: number }>) => void };
   mod: { on: boolean; toggle: () => void; selected: string | null; select: (t: string) => void; set: (t: string, m: Mod | null) => void };
   auto: { mode: AutoMode; setMode: (m: AutoMode) => void; bars: number; setBars: (b: number) => void; bpm: number; locked: boolean; tap: () => void; unlock: () => void };
@@ -160,6 +161,12 @@ export function Panel(p: Props) {
         <div className="sec">
           <div className="sec-h"><span>Input</span></div>
           {by("input").map((d) => g(d, d.key === "gain" ? { format: (v) => `${(Math.pow(4, (v - 50) / 50)).toFixed(2)}×` } : {}))}
+          {p.follow && (
+            <>
+              <Toggle label="Follow what's playing (Spotify, Music)" on={p.follow.on} onChange={p.follow.set} />
+              <div className="hint">{p.follow.on ? (p.follow.np?.title ? `Now: ${p.follow.np.title}${p.follow.np.artist ? ` · ${p.follow.np.artist}` : ""} on ${p.follow.np.app}. Titles and album art switch with every song.` : "Play something in Spotify or Apple Music. Its title and album art show up here and in the visuals.") : "Titles and album art from your music app are ignored."}</div>
+            </>
+          )}
           <div className="sec-h" style={{ marginTop: 10 }}><span>Quality</span></div>
           <div className="seg">
             {([[1, "sharp"], [0.75, "balanced"], [0.5, "fast"]] as const).map(([q, n]) => (

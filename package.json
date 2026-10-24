@@ -54,7 +54,8 @@
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Afterimage listens to your audio to drive the visuals.",
         "NSCameraUsageDescription": "Afterimage can use your camera as a visual source.",
-        "NSScreenCaptureUsageDescription": "Afterimage captures your computer's sound for the Computer audio source."
+        "NSScreenCaptureUsageDescription": "Afterimage captures your computer's sound for the Computer audio source.",
+        "NSAppleEventsUsageDescription": "Afterimage reads the song playing in Spotify or Music to show its title and album art."
       },
       "hardenedRuntime": true,
       "entitlements": "build/entitlements.mac.plist",

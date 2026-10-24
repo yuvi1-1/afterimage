@@ -11,6 +11,7 @@ import { Midi } from "./lib/midi";
 import { download, Recorder, stamp, type RecordOpts } from "./lib/recorder";
 import { Autopilot, TapTempo, type AutoMode } from "./lib/autopilot";
 import { Captions, loadCaptionPrefs, saveCaptionPrefs, type CaptionState } from "./lib/captions";
+import { desktop, nowPlayingAvailable, type NowPlaying } from "./lib/nowplaying";
 import { decodeLook, lookFromHash, shareLink } from "./lib/share";
 import { parseLrc, readTags, type LyricLine } from "./lib/tags";
 import { exportSupported, exportVideo, pickSaveTarget, type ExportProgress } from "./lib/exporter";
@@ -611,6 +612,35 @@ export default function App() {
     download(blob, `afterimage-${sceneById(lookRef.current.scene).id}-${stamp()}.${ext}`);
     toast({ text: `Saved ${(blob.size / 1e6).toFixed(1)} MB ${ext.toUpperCase()}` });
   }, [toast]);
+  // ------------------------------------------------------------------ follow what's playing (desktop)
+  const [follow, setFollowState] = useState(() => { try { return localStorage.getItem("afterimage.follow") !== "0"; } catch { return true; } });
+  const setFollow = useCallback((v: boolean) => { setFollowState(v); try { localStorage.setItem("afterimage.follow", v ? "1" : "0"); } catch { /* ignore */ } }, []);
+  const [np, setNp] = useState<NowPlaying | null>(null);
+  const npKey = useRef("");
+  useEffect(() => {
+    if (!desktop || !nowPlayingAvailable || !follow) { setNp(null); return; }
+    let alive = true;
+    desktop.nowPlaying.start();
+    const iv = setInterval(async () => {
+      let n: NowPlaying;
+      try { n = await desktop!.nowPlaying.get(); } catch { return; }
+      if (!alive) return;
+      if (!n?.playing || !n.title) return;
+      // a track, video or the demo you chose yourself wins over what other apps are playing
+      if (audio.kind === "track" || audio.kind === "demo" || audio.kind === "video") return;
+      setNp(n);
+      if (n.key === npKey.current) return;
+      npKey.current = n.key || "";
+      setCap((c) => ({ ...c, title: n.title || "", artist: n.artist || "" }));
+      audio.trackName = n.title || "";
+      audio.trackArtist = n.artist || "";
+      setSrc((s0) => ({ ...s0, title: n.title || "", sub: [n.artist, n.app].filter(Boolean).join(" · ") }));
+      if (n.art) loadImage(n.art).then(async (img) => { const r = await analyseImage(img, n.title || "cover", false); setImage(r); showPicture(r.crop, n.title || "cover"); }).catch(() => {});
+      toast({ text: `${n.app}: ${n.title}${n.artist ? ` · ${n.artist}` : ""}`, ms: 3500 });
+    }, 2000);
+    return () => { alive = false; clearInterval(iv); desktop!.nowPlaying.stop(); };
+  }, [follow, audio, showPicture, toast]);
+
   // ------------------------------------------------------------------ autopilot, tempo, modulation
   const autopilot = useMemo(() => new Autopilot(), []);
   const tapper = useMemo(() => new TapTempo(), []);
@@ -919,6 +949,7 @@ export default function App() {
         laneCount={Object.keys(lanes).length}
         midiOn={learn} toggleLearn={toggleLearn}
         quality={{ value: quality, set: setQuality }}
+        follow={nowPlayingAvailable ? { on: follow, set: setFollow, np } : null}
         cursor={{ ...cursor, set: setCursor }}
         mod={{ on: modOn, toggle: () => { setModOn((v) => !v); setModSel(null); }, selected: modSel, select: setModSel, set: setMod }}
         auto={{ mode: autoMode, setMode: setAutoMode, bars: autoBars, setBars: setAutoBars, bpm: tempo.bpm, locked: tempo.locked, tap, unlock: unlockTempo }}
