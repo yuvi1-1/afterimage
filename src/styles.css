@@ -207,3 +207,10 @@ textarea.field { height: 84px; padding: 9px 11px; font: 12px var(--mono); resize
 /* desktop app on macOS: leave room for the window buttons, and let the bar drag the window */
 .mac-app .top { left: 86px; }
 .mac-app .app::before { content: ""; position: fixed; top: 0; left: 0; right: 0; height: 12px; -webkit-app-region: drag; z-index: 100; }
+
+.scenechip svg { width: 15px; height: 15px; color: var(--dim); }
+.scenechip.live { border-color: rgba(255, 77, 77, 0.45); }
+.scenechip .m { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.livedot { width: 8px; height: 8px; border-radius: 50%; background: var(--rec); box-shadow: 0 0 0 0 rgba(255, 77, 77, 0.6); animation: livepulse 1.6s infinite; }
+@keyframes livepulse { 70% { box-shadow: 0 0 0 7px rgba(255, 77, 77, 0); } 100% { box-shadow: 0 0 0 0 rgba(255, 77, 77, 0); } }
+@media (max-width: 760px) { .scenechip .m { display: none; } }

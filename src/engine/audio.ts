@@ -129,6 +129,8 @@ export class AudioEngine {
       stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } as MediaTrackConstraints });
       stream.getVideoTracks().forEach((t) => t.stop());
       if (!stream.getAudioTracks().length) throw new Error("noaudio");
+      // macOS hands back an already-ended track when System Audio Recording permission is missing
+      if (stream.getAudioTracks().every((t) => t.readyState === "ended")) throw new Error("denied");
     }
     this.stopAll(kind);
     this.stream = stream;

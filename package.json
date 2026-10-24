@@ -29,8 +29,8 @@
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",
-    "electron": "^33.2.0",
-    "electron-builder": "^25.1.8",
+    "electron": "^44.6.0",
+    "electron-builder": "^26.17.0",
     "typescript": "^5.6.3",
     "vite": "^5.4.10"
   },
@@ -55,7 +55,8 @@
         "NSMicrophoneUsageDescription": "Afterimage listens to your audio to drive the visuals.",
         "NSCameraUsageDescription": "Afterimage can use your camera as a visual source.",
         "NSScreenCaptureUsageDescription": "Afterimage captures your computer's sound for the Computer audio source.",
-        "NSAppleEventsUsageDescription": "Afterimage reads the song playing in Spotify or Music to show its title and album art."
+        "NSAppleEventsUsageDescription": "Afterimage reads the song playing in Spotify or Music to show its title and album art.",
+        "NSAudioCaptureUsageDescription": "Afterimage listens to what your Mac is playing so the visuals can react to it."
       },
       "hardenedRuntime": true,
       "entitlements": "build/entitlements.mac.plist",

@@ -5,8 +5,8 @@ const nowPlaying = require("./nowplaying.cjs");
 const path = require("path");
 const { pathToFileURL } = require("url");
 
-// System audio capture on macOS 13+ (ScreenCaptureKit loopback). Windows loopback works out of the box.
-app.commandLine.appendSwitch("enable-features", "MacLoopbackAudioForScreenShare,MacSckSystemAudioLoopbackOverride");
+// System audio: Windows uses WASAPI loopback; macOS 14.2+ uses the CoreAudio tap (Electron 39+),
+// which needs NSAudioCaptureUsageDescription in Info.plist (see package.json → build.mac.extendInfo).
 
 app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 
@@ -72,8 +72,12 @@ app.whenReady().then(() => {
   const win = createWindow();
   if (process.env.AFTERIMAGE_SMOKE) {
     // CI smoke test: render for a few seconds, save a frame, exit.
-    win.webContents.on("console-message", (_e, level, msg) => level >= 2 && console.log("renderer:", msg));
+    win.webContents.on("console-message", (e, level, msg) => {
+      const lv = e?.level ?? level, m = e?.message ?? msg;
+      if (lv === "error" || lv === "warning" || lv >= 2) console.log("renderer:", m);
+    });
     win.webContents.once("did-finish-load", () => setTimeout(async () => {
+      console.log("bridge:", await win.webContents.executeJavaScript("JSON.stringify({ desktop: !!window.afterimageDesktop, platform: window.afterimageDesktop && window.afterimageDesktop.platform, scenes: document.title })"));
       const img = await win.webContents.capturePage();
       require("fs").writeFileSync(process.env.AFTERIMAGE_SMOKE, img.toPNG());
       app.quit();

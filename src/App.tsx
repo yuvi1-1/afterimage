@@ -391,7 +391,7 @@ export default function App() {
       return true;
     } catch (e) {
       const m = String((e as Error).message || e);
-      if (!quiet) toast({ text: m === "noaudio" ? "No sound was shared. Pick a screen or tab and tick “Share audio”." : kind === "mic" ? "Microphone access was blocked." : "Sharing was cancelled." });
+      if (!quiet) toast({ text: m === "noaudio" ? "No sound was shared. Pick a screen or tab and tick “Share audio”." : m === "denied" ? "macOS blocked the sound. Allow Afterimage in System Settings → Privacy & Security → Screen & System Audio Recording, then reopen it." : kind === "mic" ? "Microphone access was blocked." : "Sharing was cancelled.", ms: m === "denied" ? 12000 : undefined });
       return false;
     }
   }, [audio, syncSrc, toast]);
@@ -894,6 +894,9 @@ export default function App() {
         <button className="scenechip glass" onClick={() => setSheet("scenes")}>
           <span className="k">Scene</span><span className="n">{scene.name}</span>{modeName && <span className="m">· {modeName}</span>}
           {scene.pro && !pro && <span className="pro-badge">PRO</span>}
+        </button>
+        <button className={`scenechip glass${src.kind === "system" ? " live" : ""}`} onClick={() => (src.kind === "system" ? (audio.stopAll(), syncSrc()) : useLive("system"))} title={src.kind === "system" ? "Stop listening to this computer" : "React to whatever this computer is playing: Spotify, Apple Music, YouTube, anything"}>
+          {src.kind === "system" ? <><span className="livedot" /><span className="n">Live</span><span className="m">{src.title && src.title !== "Computer audio" ? src.title : IS_MAC_APP ? "this Mac" : "this computer"}</span></> : <><Icon.speaker /><span className="n">{IS_MAC_APP ? "Listen to this Mac" : "Listen to this computer"}</span></>}
         </button>
         {autoMode !== "off" && <button className="scenechip glass" onClick={() => setAutoMode("off")} title="Autopilot is changing looks by itself. Click to stop (A)"><span className="k">Autopilot</span><span className="n">{autoMode}</span></button>}
         <div className="spacer" />
