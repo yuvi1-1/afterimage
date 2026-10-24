@@ -892,7 +892,7 @@ export default function App() {
       {nothing && !hidden && (
         <div className="empty ui">
           <h1>Make the music visible.</h1>
-          <p>Drop a song, a photo, or a screenshot of what's playing.<br />Album covers are found automatically.</p>
+          <p>Drop a song and its album art, title and lyrics come with it.<br />Or drop a screenshot of what's playing, and the cover is found for you.</p>
           <div className="row">
             <button className="btn primary" onClick={useDemo}><Icon.play /> Play the demo</button>
             <button className="btn" onClick={() => fileInput.current?.click()}><Icon.music /> Open a file</button>
