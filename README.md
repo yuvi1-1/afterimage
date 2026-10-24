@@ -82,7 +82,7 @@ npm run dev        # http://localhost:5173
 | `npm run desktop` | Runs the desktop app from the build. |
 | `npm run dist` | Installers in `release/`: `.dmg`/`.zip` on macOS, `.exe`/`.zip` on Windows, `.AppImage` on Linux. |
 
-Pushing a tag like `v1.0.0` runs [`release.yml`](.github/workflows/release.yml). It builds the installers for all three platforms and deploys the web app to GitHub Pages.
+Every push to `main` deploys the web app to GitHub Pages ([`pages.yml`](.github/workflows/pages.yml)). Pushing a tag like `v1.0.0` builds installers for all three platforms and attaches them to the GitHub release ([`release.yml`](.github/workflows/release.yml)).
 
 **Requirements:** a browser with WebGL2 and float render targets (every current desktop browser), and Node 20+ to build.
 
