@@ -1,0 +1,74 @@
+{
+  "name": "afterimage",
+  "productName": "Afterimage",
+  "version": "1.0.0",
+  "description": "Audio-reactive visuals from any sound, photo or album cover.",
+  "author": "Yuvraj Pegu",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "module",
+  "main": "desktop/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "desktop": "npm run build && electron .",
+    "dist": "npm run build && electron-builder",
+    "keygen": "node scripts/license.mjs keygen",
+    "sign": "node scripts/license.mjs sign"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tweetnacl": "^1.0.3"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  },
+  "build": {
+    "appId": "app.afterimage.desktop",
+    "productName": "Afterimage",
+    "files": [
+      "dist/**/*",
+      "desktop/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "mac": {
+      "category": "public.app-category.music",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Afterimage listens to your audio to drive the visuals.",
+        "NSCameraUsageDescription": "Afterimage can use your camera as a visual source.",
+        "NSScreenCaptureUsageDescription": "Afterimage captures your computer's sound for the Computer audio source."
+      },
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ]
+    },
+    "icon": "build/icon.png",
+    "publish": null
+  }
+}
