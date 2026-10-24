@@ -156,7 +156,33 @@ export class Engine {
     this.onError?.(this.error);
   }
 
-  setImage(src: TexImageSource & { width: number; height: number }) {
+  /** Show a picture. With `fade`, the previous picture dissolves into the new one (new album art, for example). */
+  setImage(src: TexImageSource & { width: number; height: number }, fade = false) {
+    const snap = snapshot(src, 1024);
+    if (fade && this.hasImage && !this.video && this.lastPic && snap) {
+      this.fadeFrom = this.lastPic;
+      this.fadeSnap = snap;
+      this.fadeTo = src;
+      this.fadeT = 0;
+    } else {
+      this.fadeTo = null;
+      this.fadeT = 1;
+      this.uploadImage(src);
+    }
+    this.lastPic = snap;
+  }
+
+  private imgH = 1;
+  private lastPic: HTMLCanvasElement | null = null;
+  private fadeFrom: HTMLCanvasElement | null = null;
+  private fadeSnap: HTMLCanvasElement | null = null;
+  private fadeTo: (TexImageSource & { width: number; height: number }) | null = null;
+  private fadeT = 1;
+  private fadeCanvas: HTMLCanvasElement | null = null;
+  /** 0..1, eases in while a picture is shown on the picture scene: keeps it looking like the file */
+  private photoK = 0;
+
+  private uploadImage(src: TexImageSource & { width: number; height: number }) {
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, this.imgTex);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
@@ -164,17 +190,48 @@ export class Engine {
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.generateMipmap(gl.TEXTURE_2D);
     this.imgAspect = src.width / src.height;
+    this.imgH = src.height;
     this.hasImage = true;
+  }
+
+  /** one step of the cover crossfade: blend old and new on a small canvas, then upload the full-size picture */
+  private stepFade(dt: number) {
+    if (!this.fadeTo || this.fadeT >= 1) return;
+    this.fadeT = Math.min(1, this.fadeT + dt / 0.9);
+    if (this.fadeT >= 1 || !this.fadeFrom || !this.fadeSnap) {
+      const to = this.fadeTo;
+      this.fadeTo = this.fadeFrom = this.fadeSnap = null;
+      this.fadeT = 1;
+      this.uploadImage(to);
+      return;
+    }
+    const to = this.fadeSnap, from = this.fadeFrom;
+    const c = (this.fadeCanvas ??= document.createElement("canvas"));
+    if (c.width !== to.width || c.height !== to.height) { c.width = to.width; c.height = to.height; }
+    const x = c.getContext("2d");
+    if (!x) { this.fadeT = 1; return; }
+    const k = this.fadeT * this.fadeT * (3 - 2 * this.fadeT);
+    x.globalAlpha = 1;
+    // old picture fills the new frame without stretching
+    const s = Math.max(c.width / from.width, c.height / from.height);
+    x.drawImage(from, (c.width - from.width * s) / 2, (c.height - from.height * s) / 2, from.width * s, from.height * s);
+    x.globalAlpha = k;
+    x.drawImage(to, 0, 0);
+    x.globalAlpha = 1;
+    this.uploadImage(c);
   }
 
   setVideo(v: HTMLVideoElement | null) {
     this.video = v;
-    if (v) this.hasImage = true;
+    if (v) { this.hasImage = true; this.fadeTo = null; this.fadeT = 1; this.lastPic = null; }
   }
 
   clearImage() {
     this.video = null;
     this.hasImage = false;
+    this.fadeTo = null;
+    this.fadeT = 1;
+    this.lastPic = null;
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, this.imgTex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([20, 20, 28, 255]));
@@ -258,6 +315,7 @@ export class Engine {
     gl.uniform1f(u.uChaos, this.cur.chaos / 100);
     gl.uniform1f(u.uSpecRow, this.audio.specRow / SPEC.rows);
     gl.uniform1f(u.uImgAspect, this.imgAspect);
+    gl.uniform1f(u.uImgH, this.imgH);
     gl.uniform1f(u.uHasImg, this.hasImage ? 1 : 0);
     gl.uniform1fv(u.uS, this.curScene.map((v) => v / 100).concat([0, 0, 0, 0, 0, 0]).slice(0, 6));
     gl.uniform1i(u.uMode, this.look.modes[this.scene.id] ?? 0);
@@ -326,7 +384,10 @@ export class Engine {
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, SPEC.bins, 1, gl.RGBA, gl.UNSIGNED_BYTE, this.audio.waveTex);
     gl.bindTexture(gl.TEXTURE_2D, this.specTex);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, SPEC.bins, SPEC.rows, gl.RED, gl.UNSIGNED_BYTE, this.audio.specTex);
+    this.stepFade(dt);
+    this.photoK += ((this.scene.id === "limitless" && this.hasImage ? 1 : 0) - this.photoK) * (1 - Math.exp(-dt * 6));
     if (this.video && this.video.readyState >= 2 && this.video.videoWidth) {
+      this.imgH = this.video.videoHeight;
       gl.bindTexture(gl.TEXTURE_2D, this.imgTex);
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, this.video);
@@ -362,6 +423,7 @@ export class Engine {
     gl.uniform1f(f.u.uBass, b.bass * this.react);
     gl.uniform1f(f.u.uKick, b.kick * this.react);
     gl.uniform1f(f.u.uTime, this.time);
+    gl.uniform1f(f.u.uPhoto, this.photoK);
     this.emblemUniforms(f, this.emblem.on && !this.emblem.clean);
     gl.uniform3fv(f.u.uPal, this.palCur.flat());
     this.cursorUniforms(f, true);
@@ -399,6 +461,7 @@ export class Engine {
     gl.uniform1f(F.u.uHeat, this.cur.heat / 100);
     gl.uniform1f(F.u.uBright, Math.pow(2, (this.cur.brightness - 50) / 50 * 1.0) * (this.cur.brightness < 50 ? 1 : 1.2));
     gl.uniform1f(F.u.uExposure, this.exposure);
+    gl.uniform1f(F.u.uPhoto, this.photoK);
     gl.uniform1f(F.u.uHue, this.hue);
     gl.uniform1f(F.u.uVig, this.cur.vignette / 100);
     gl.uniform1f(F.u.uChaos, this.cur.chaos / 100);
@@ -501,3 +564,20 @@ export class Engine {
 }
 
 export { SCENES };
+
+/** A copy of a picture no larger than `max` pixels on its long side (for crossfades). */
+function snapshot(src: TexImageSource & { width: number; height: number }, max: number): HTMLCanvasElement | null {
+  try {
+    const W = (src as HTMLImageElement).naturalWidth || src.width, H = (src as HTMLImageElement).naturalHeight || src.height;
+    if (!W || !H) return null;
+    const k = Math.min(1, max / Math.max(W, H));
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(W * k));
+    c.height = Math.max(1, Math.round(H * k));
+    const x = c.getContext("2d");
+    if (!x) return null;
+    x.imageSmoothingQuality = "high";
+    x.drawImage(src as CanvasImageSource, 0, 0, c.width, c.height);
+    return c;
+  } catch { return null; }
+}

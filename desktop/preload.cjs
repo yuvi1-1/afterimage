@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld("afterimageDesktop", {
   nowPlaying: {
     start: () => ipcRenderer.invoke("np:start"),
     stop: () => ipcRenderer.invoke("np:stop"),
-    get: () => ipcRenderer.invoke("np:get"),
+    get: (haveArtId) => ipcRenderer.invoke("np:get", haveArtId),
   },
+  // Opens System Settings at Privacy & Security → Screen & System Audio Recording (macOS).
+  openAudioPermission: () => ipcRenderer.invoke("sys:audio-permission"),
 });

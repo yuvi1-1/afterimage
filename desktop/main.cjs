@@ -45,7 +45,15 @@ function createWindow() {
 app.whenReady().then(() => {
   ipcMain.handle("np:start", () => { nowPlaying.start(); return nowPlaying.supported; });
   ipcMain.handle("np:stop", () => nowPlaying.stop());
-  ipcMain.handle("np:get", () => nowPlaying.get());
+  ipcMain.handle("np:get", (_e, haveArtId) => nowPlaying.get(haveArtId));
+  ipcMain.handle("sys:audio-permission", async () => {
+    if (process.platform !== "darwin") return false;
+    // Sonoma and later: "Screen & System Audio Recording". The legacy URL still lands on the same pane.
+    for (const u of ["x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ScreenCapture", "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"]) {
+      try { await shell.openExternal(u); return true; } catch { /* try the next */ }
+    }
+    return false;
+  });
   protocol.handle("app", (req) => {
     const u = new URL(req.url);
     let p = path.normalize(path.join(DIST, decodeURIComponent(u.pathname)));

@@ -37,41 +37,119 @@ export const hexToRgb = (h: string): [number, number, number] => {
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 };
 
-/** Five-slot palette from an image (k-means on a small thumbnail), sorted dark to light. */
+/** Five-slot palette from an image: album art in, matching visuals out.
+ *  Clusters the picture in Oklab (perceptual), then fills the slots the way a designer would:
+ *  background (its darkest real colour, deepened), shadow, mid (its main colour), accent (its most vivid
+ *  colour that actually matters), glow (its lightest colour, lifted toward white). */
 export function paletteFromImage(src: CanvasImageSource, w: number, h: number): [string, string, string, string, string] {
-  const s = Math.min(1, 48 / Math.max(w, h));
+  const s = Math.min(1, 72 / Math.max(w, h));
   const c = document.createElement("canvas");
   c.width = Math.max(1, Math.round(w * s));
   c.height = Math.max(1, Math.round(h * s));
   const x = c.getContext("2d", { willReadFrequently: true })!;
+  x.imageSmoothingQuality = "high";
   x.drawImage(src, 0, 0, c.width, c.height);
   const d = x.getImageData(0, 0, c.width, c.height).data;
-  const px: number[][] = [];
-  for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 32) px.push([d[i] / 255, d[i + 1] / 255, d[i + 2] / 255]);
+  const px: Lab[] = [];
+  for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 32) px.push(toOklab(d[i] / 255, d[i + 1] / 255, d[i + 2] / 255));
   if (px.length < 5) return PALETTES[0].c;
-  const L = (p: number[]) => p[0] * 0.299 + p[1] * 0.587 + p[2] * 0.114;
-  px.sort((a, b) => L(a) - L(b));
-  const K = 6;
-  let cents = Array.from({ length: K }, (_, i) => px[Math.floor(((i + 0.5) / K) * px.length)].slice());
-  const counts = new Array(K).fill(0);
-  for (let it = 0; it < 8; it++) {
-    const sums = Array.from({ length: K }, () => [0, 0, 0]);
+  return paletteFromLab(px);
+}
+
+type Lab = [number, number, number];
+
+export function paletteFromLab(px: Lab[]): [string, string, string, string, string] {
+  // k-means++ with deterministic farthest-point seeding
+  const K = Math.min(8, px.length);
+  const dist = (a: Lab, b: Lab) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2;
+  const cents: Lab[] = [];
+  let mean: Lab = [0, 0, 0];
+  for (const p of px) { mean[0] += p[0]; mean[1] += p[1]; mean[2] += p[2]; }
+  mean = [mean[0] / px.length, mean[1] / px.length, mean[2] / px.length];
+  let best = px[0], bd = -1;
+  for (const p of px) { const dd = dist(p, mean); if (dd > bd) { bd = dd; best = p; } }
+  cents.push(best.slice() as Lab);
+  const near = px.map((p) => dist(p, cents[0]));
+  while (cents.length < K) {
+    let bi = 0, bv = -1;
+    for (let i = 0; i < px.length; i++) if (near[i] > bv) { bv = near[i]; bi = i; }
+    if (bv <= 1e-6) break;
+    cents.push(px[bi].slice() as Lab);
+    for (let i = 0; i < px.length; i++) near[i] = Math.min(near[i], dist(px[i], cents[cents.length - 1]));
+  }
+  const n = cents.length, counts = new Array(n).fill(0);
+  for (let it = 0; it < 12; it++) {
+    const sums = Array.from({ length: n }, () => [0, 0, 0]);
     counts.fill(0);
     for (const p of px) {
-      let bi = 0, bd = 9;
-      for (let k = 0; k < K; k++) {
-        const q = cents[k], dd = (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2 + (p[2] - q[2]) ** 2;
-        if (dd < bd) { bd = dd; bi = k; }
-      }
+      let bi = 0, bdd = 9;
+      for (let k = 0; k < n; k++) { const dd = dist(p, cents[k]); if (dd < bdd) { bdd = dd; bi = k; } }
       sums[bi][0] += p[0]; sums[bi][1] += p[1]; sums[bi][2] += p[2]; counts[bi]++;
     }
-    cents = cents.map((q, k) => (counts[k] ? sums[k].map((v) => v / counts[k]) : q));
+    for (let k = 0; k < n; k++) if (counts[k]) cents[k] = [sums[k][0] / counts[k], sums[k][1] / counts[k], sums[k][2] / counts[k]];
   }
-  const order = cents.map((q, k) => ({ q, n: counts[k] })).filter((o) => o.n).sort((a, b) => L(a.q) - L(b.q));
-  const hex = (q: number[]) => "#" + q.map((v) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, "0")).join("");
-  const dark = order[0].q.map((v) => v * 0.2);
-  const light = order[order.length - 1].q.map((v) => v * 0.55 + 0.45);
-  const mids = order.slice(1, -1);
-  while (mids.length < 3) mids.push(order[Math.min(order.length - 1, mids.length)]);
-  return [hex(dark), hex(mids[0].q), hex(mids[Math.floor(mids.length / 2)].q), hex(mids[mids.length - 1].q), hex(light)];
+  const total = px.length;
+  type Cl = { c: Lab; share: number; L: number; C: number };
+  let cl: Cl[] = cents.map((c, k) => ({ c, share: counts[k] / total, L: c[0], C: Math.hypot(c[1], c[2]) })).filter((o) => o.share > 0);
+  // merge near-identical clusters so one colour can't take two slots
+  cl.sort((a, b) => b.share - a.share);
+  const merged: Cl[] = [];
+  for (const o of cl) {
+    const m = merged.find((q) => Math.sqrt(dist(q.c, o.c)) < 0.045);
+    if (m) m.share += o.share; else merged.push({ ...o });
+  }
+  cl = merged;
+  const real = cl.filter((o) => o.share >= 0.025);
+  const pool = real.length >= 2 ? real : cl;
+  const byL = pool.slice().sort((a, b) => a.L - b.L);
+  const darkest = byL[0];
+  // glow comes from the lightest colour, even a small one (white type on a cover counts)
+  const brightest = cl.filter((o) => o.share >= 0.004).sort((a, b) => b.L - a.L)[0];
+  const lightest = brightest && brightest.L > 0.85 ? brightest : byL[byL.length - 1];
+  const whiteGlow = lightest.L > 0.85;
+  const hue = (o: Cl) => Math.atan2(o.c[2], o.c[1]);
+  const hueGap = (x: Cl, y: Cl) => { const d = Math.abs(hue(x) - hue(y)) % (2 * Math.PI); return Math.min(d, 2 * Math.PI - d); };
+  // mid: the cover's main colour (largest area that isn't near black or its white)
+  const mainPool = pool.filter((o) => o.L > 0.2 && !(whiteGlow && o === lightest));
+  const mainScore = (o: Cl) => o.share * (0.3 + Math.min(o.C / 0.1, 1) * 0.7);
+  const mid = (mainPool.length ? mainPool : pool).slice().sort((x, y) => mainScore(y) - mainScore(x))[0];
+  // accent: vivid, present, and a different colour from the main one
+  const score = (o: Cl) => o.C * Math.sqrt(o.share) * (0.4 + Math.min(o.L, 0.85)) * (o.C > 0.03 && mid.C > 0.03 ? 0.35 + hueGap(o, mid) / Math.PI : 0.6);
+  const accentPool = pool.filter((o) => o !== mid && Math.sqrt(dist(o.c, mid.c)) > 0.06 && !(whiteGlow && o === lightest) && o.L > 0.12);
+  const accent = accentPool.length ? accentPool.slice().sort((x, y) => score(y) - score(x))[0] : mid;
+  // shadow: a real darker colour between the background and the mid, else a blend
+  const shadowCand = pool.filter((o) => o !== mid && o !== accent && o !== lightest && o.share >= 0.08 && o.L > darkest.L + 0.04 && o.L < Math.max(mid.L, accent.L)).sort((a, b) => b.share - a.share)[0];
+  const lerp = (a: Lab, b: Lab, t: number): Lab => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  // background: the darkest colour's hue, deepened so the visuals have depth
+  const bgL = Math.min(darkest.L * 0.55, 0.14);
+  const bgK = darkest.L > 0 ? Math.min(1, bgL / Math.max(darkest.L, 1e-3)) : 0;
+  const bg: Lab = [bgL, darkest.c[1] * bgK * 0.9, darkest.c[2] * bgK * 0.9];
+  let shadow: Lab = shadowCand ? shadowCand.c : lerp(bg, mid.c, 0.42);
+  if (shadow[0] > 0.5) shadow = [shadow[0] * 0.6, shadow[1] * 0.85, shadow[2] * 0.85];
+  // glow: the lightest colour lifted toward white, keeping a hint of its tint
+  const gl = lightest.c;
+  const glow: Lab = [Math.max(gl[0], 0.93), gl[1] * 0.45, gl[2] * 0.45];
+  // keep the middle of the ramp ordered dark to light so gradients stay smooth
+  let m1 = mid.c, m2 = accent.c;
+  if (m1[0] > m2[0] + 0.08) [m1, m2] = [m2, m1];
+  if (shadow[0] > m1[0]) shadow = lerp(bg, m1, 0.45);
+  return [bg, shadow, m1, m2, glow].map(labHex) as [string, string, string, string, string];
+}
+
+function toOklab(r: number, g: number, b: number): Lab {
+  const lin = (v: number) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  r = lin(r); g = lin(g); b = lin(b);
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  return [0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s, 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s];
+}
+
+function labHex([L, a, b]: Lab): string {
+  const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+  const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+  const s = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
+  const rgb = [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s, -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s];
+  const enc = (v: number) => { v = Math.max(0, Math.min(1, v)); return v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055; };
+  return "#" + rgb.map((v) => Math.round(enc(v) * 255).toString(16).padStart(2, "0")).join("");
 }

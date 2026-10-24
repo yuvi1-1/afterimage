@@ -23,6 +23,7 @@ export const PRELUDE = `#version 300 es
 precision highp float;
 uniform vec2 uRes;
 uniform float uTime, uT, uBass, uMid, uHigh, uLevel, uKick, uAccent, uBeatPhase, uReact, uChaos, uSpecRow, uImgAspect, uHasImg, uDry;
+uniform float uImgH; // picture height in pixels (sharp, alias-free sampling)
 uniform float uS[6];
 uniform int uMode;
 uniform vec3 uPal[5];
@@ -55,6 +56,7 @@ export const FEEDBACK = `#version 300 es
 precision highp float;
 uniform sampler2D uScene, uPrevAcc, uEmblem;
 uniform vec2 uRes;
+uniform float uPhoto; // 1 while a picture is shown on the picture scene: keep it sharp
 uniform float uTrails, uChaos, uBass, uKick, uTime, uEmblemOn, uEmblemSize, uEmblemOpacity, uEmblemPulse, uEmblemSpin, uEmblemAspect, uEmblemWhite, uEmblemInvert;
 uniform vec3 uPal[5];
 uniform vec2 uMouseP, uMouseV;
@@ -80,10 +82,12 @@ void main(){
   vec2 p = (uv - .5)*vec2(A, 1.);
   if(uEmblemOn > .5){ vec4 e = emblem(p); cur = mix(cur, e.rgb*1.2, e.a); }
   // feedback warp: gentle zoom on bass, chaos adds turbulent drift and tunnel pull
+  // (a shown picture keeps its history aligned, so it stays crisp instead of ghosting)
   vec2 fc = p;
-  fc *= 1. - (.002 + uBass*.014 + uChaos*.012);
-  fc = rot(uChaos*.012*sin(uTime*.31))*fc;
-  fc += (vec2(fbm3(fc*3. + uTime*.4), fbm3(fc*3. - uTime*.37 + 7.)) - .5)*.012*uChaos;
+  float drift = 1. - uPhoto;
+  fc *= 1. - (.002 + uBass*.014 + uChaos*.012)*drift;
+  fc = rot(uChaos*.012*sin(uTime*.31)*drift)*fc;
+  fc += (vec2(fbm3(fc*3. + uTime*.4), fbm3(fc*3. - uTime*.37 + 7.)) - .5)*.012*uChaos*drift;
   // cursor: drag or whirl the picture's history around the pointer
   if(uCurMode > .5 && uMouseAct > .001){
     vec2 m = (uMouseP - .5)*vec2(A, 1.);
@@ -94,7 +98,7 @@ void main(){
     if(uCurMode < 1.5 || uCurMode > 3.5) cur += mix(uPal[3], uPal[4], .25)*exp(-dd*dd/.002)*uMouseAct*.35*uCurAmt;
   }
   vec3 prev = texture(uPrevAcc, fc/vec2(A, 1.) + .5).rgb;
-  float t = uTrails*.95;
+  float t = uTrails*.95*(1. - uPhoto*.45);
   vec3 col = mix(cur, prev, t);
   col = max(col, cur*(1. - t*.55));
   fragColor = vec4(col, 1.);
@@ -114,10 +118,11 @@ uniform float uSym, uTiles, uTwist, uSlice, uSpin, uLens, uLensStyle;
 uniform float uEmblemOn, uEmblemClean, uEmblemSize, uEmblemOpacity, uEmblemPulse, uEmblemSpin, uEmblemAspect, uEmblemWhite, uEmblemInvert;
 uniform vec3 uPal[5];
 uniform float uLetter; // 1 = draw frame guides off
+uniform float uPhoto; // 1 while a picture is shown: it looks exactly like the file, music adds glow to its highlights
 out vec4 fragColor;
 ${HELPERS}
 vec2 mirror(vec2 uv){ return 1. - abs(1. - mod(uv, 2.)); }
-vec3 knee(vec3 c){ const float k = .74; vec3 o = max(c - k, 0.); return min(c, vec3(k)) + (1. - k)*(1. - exp(-o/(1. - k))); }
+vec3 knee(vec3 c, float k){ vec3 o = max(c - k, 0.); return min(c, vec3(k)) + (1. - k)*(1. - exp(-o/(1. - k))); }
 void main(){
   vec2 uv = gl_FragCoord.xy/uRes;
   float A = uRes.x/uRes.y;
@@ -171,7 +176,7 @@ void main(){
     wave = exp(-abs(r - rad)*45.)*exp(-uClick.z*1.8)*uCurAmt;
     q -= d/r*wave*.035;
   }
-  q += (vec2(fbm3(q*2.5 + uTime*.15), fbm3(q*2.5 - uTime*.15 + 4.)) - .5)*uChaos*.05;
+  q += (vec2(fbm3(q*2.5 + uTime*.15), fbm3(q*2.5 - uTime*.15 + 4.)) - .5)*uChaos*.05*(1. - uPhoto*.85);
   vec2 suv = mirror(q/vec2(A, 1.) + .5);
   vec3 c;
   if(uLens > .001 && int(uLensStyle + .5) == 2){ // anamorphic chromatic spread + streak
@@ -183,15 +188,16 @@ void main(){
   c *= shade*tint;
   // ---- bloom + flash ----
   vec3 g = textureLod(uAcc, suv, 2.5).rgb*.4 + textureLod(uAcc, suv, 4.5).rgb*.6;
-  c += g*g*uHeat*(1.4 + uBass*1.2);
-  c += uKick*uHeat*.08*uPal[4];
+  vec3 hl = max(g - .55, 0.);
+  c += mix(g*g*uHeat*(1.4 + uBass*1.2), hl*hl*uHeat*(uBass*2.4 + uKick*2. + uHigh*.8), uPhoto);
+  c += uKick*uHeat*.08*uPal[4]*(1. - uPhoto);
   if(uCurMode > 3.5) c += mix(uPal[3], uPal[4], .6)*exp(-length(p - mp)*9.)*(.12 + uMouseAct*.6)*uCurAmt;
   c += uPal[4]*wave*.35;
   c *= uExposure*uBright;
   c = hueRot(c, uHue);
   float v = smoothstep(1.3, .2, length((uv - .5)*vec2(A*.9, 1.)));
   c *= mix(1., v, uVig);
-  c = knee(max(c, 0.));
+  c = knee(max(c, 0.), mix(.74, .96, uPhoto)); // a shown picture keeps its whites white
   if(uEmblemOn > .5 && uEmblemClean > .5){
     vec2 ep = (uv - .5)*vec2(A, 1.);
     float s = uEmblemSize*(1. + uKick*uEmblemPulse*.25);

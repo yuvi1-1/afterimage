@@ -369,12 +369,14 @@ export default function App() {
   }, [audio, syncSrc]);
 
   const useDemo = useCallback(() => { stopVideo(); audio.playDemo(); setPeaks(null); lanesRef.current = {}; setLanes({}); syncSrc(); }, [audio, syncSrc]);
+  const systemBlocked = useRef(false);
   const useLive = useCallback(async (kind: "mic" | "system", quiet = false): Promise<boolean> => {
     try {
       stopVideo();
       await audio.live(kind);
+      if (kind === "system") systemBlocked.current = false;
       syncSrc();
-      if (!quiet) toast({ text: kind === "system" ? "Listening to your computer. Play something in Spotify, YouTube or any app." : "Listening to your audio input." });
+      if (!quiet) toast({ text: kind === "system" ? "Listening to your computer. Play something in Spotify, YouTube or any app." : IS_MAC_APP ? "Listening to your audio input. With AirPods or other Bluetooth headphones, macOS switches them to call quality while a microphone is open. Use “Listen to this Mac” to keep full quality." : "Listening to your audio input.", ms: kind === "mic" && IS_MAC_APP ? 9000 : undefined });
       // watchdog: a granted-but-silent capture usually means a missing OS permission
       if (kind === "system") {
         let heard = 0;
@@ -384,14 +386,23 @@ export default function App() {
           heard = Math.max(heard, audio.bands.level);
           if (Date.now() - t0 > 12000) {
             clearInterval(iv);
-            if (heard < 0.02) toast({ text: IS_MAC_APP ? "Not hearing anything yet. Play some music. If it still doesn't react, allow Afterimage under System Settings → Privacy & Security → Screen & System Audio Recording, then reopen it." : "Not hearing anything yet. Play some music, or choose Input to use the microphone.", ms: 12000, chips: [{ label: "Use microphone", run: () => { useLiveRef.current("mic"); } }] });
+            // Never fall back to the microphone on the desktop: opening a mic drops Bluetooth headphones
+            // (AirPods and the like) into call mode, which makes the music quieter and lo-fi.
+            if (heard < 0.02) toast(IS_MAC_APP
+              ? { text: "Not hearing anything yet. Play some music. If it still doesn't react, allow Afterimage under Screen & System Audio Recording.", ms: 12000, chips: [{ label: "Open settings", run: () => { void desktop?.openAudioPermission?.(); } }] }
+              : IS_DESKTOP ? { text: "Not hearing anything yet. Play some music and the visuals follow it.", ms: 8000 }
+              : { text: "Not hearing anything yet. Play some music, or choose Input to use the microphone.", ms: 12000, chips: [{ label: "Use microphone", run: () => { useLiveRef.current("mic"); } }] });
           }
         }, 300);
       }
       return true;
     } catch (e) {
       const m = String((e as Error).message || e);
-      if (!quiet) toast({ text: m === "noaudio" ? "No sound was shared. Pick a screen or tab and tick “Share audio”." : m === "denied" ? "macOS blocked the sound. Allow Afterimage in System Settings → Privacy & Security → Screen & System Audio Recording, then reopen it." : kind === "mic" ? "Microphone access was blocked." : "Sharing was cancelled.", ms: m === "denied" ? 12000 : undefined });
+      const blocked = kind === "system" && IS_MAC_APP && m !== "noaudio";
+      if (blocked) systemBlocked.current = true;
+      if (!quiet) toast(blocked
+        ? { text: "macOS hasn't let Afterimage hear this Mac yet. Turn Afterimage on under Privacy & Security → Screen & System Audio Recording. It starts listening as soon as you come back.", ms: 15000, chips: [{ label: "Open settings", run: () => { void desktop?.openAudioPermission?.(); } }] }
+        : { text: m === "noaudio" ? "No sound was shared. Pick a screen or tab and tick “Share audio”." : kind === "mic" ? "Microphone access was blocked." : "Sharing was cancelled." });
       return false;
     }
   }, [audio, syncSrc, toast]);
@@ -399,29 +410,42 @@ export default function App() {
   useLiveRef.current = useLive;
 
   // Desktop app: start listening to whatever the computer is playing, straight away.
+  // System audio only. The microphone is never opened unless you pick Input yourself.
   useEffect(() => {
     if (!IS_DESKTOP) return;
     const t = setTimeout(async () => {
       if (audio.kind !== "none") return;
       if (await useLiveRef.current("system", true)) toast({ text: "Listening to your computer. Play any music and the visuals follow it." });
-      else if (await useLiveRef.current("mic", true)) toast({ text: "Listening through the microphone. Allow screen & system audio recording to capture your computer's sound directly." });
+      else if (IS_MAC_APP) toast({ text: "To react to Apple Music, Spotify or anything else playing, turn Afterimage on under Privacy & Security → Screen & System Audio Recording. It starts listening as soon as you come back.", ms: 15000, chips: [{ label: "Open settings", run: () => { void desktop?.openAudioPermission?.(); } }] });
     }, 600);
-    return () => clearTimeout(t);
+    // after the permission is granted in System Settings, pick up listening when the window is back in front
+    const retry = async () => {
+      if (!systemBlocked.current || audio.kind !== "none") return;
+      if (await useLiveRef.current("system", true)) { systemBlocked.current = false; toast({ text: "Listening to this Mac. Play any music and the visuals follow it." }); }
+    };
+    window.addEventListener("focus", retry);
+    return () => { clearTimeout(t); window.removeEventListener("focus", retry); };
   }, [audio, toast]);
 
-  const showPicture = useCallback((c: HTMLCanvasElement, name: string) => {
+  // A picture (album art, photo) always sets the colours of whatever scene is on: album art in, matching
+  // visuals out. The picture itself plays on the picture scenes; elsewhere a "Show it" chip jumps there.
+  // Returns true when the picture is on screen right away.
+  const showPicture = useCallback((c: HTMLCanvasElement, name: string, opts: { fade?: boolean; jump?: boolean } = {}): boolean => {
     const e = engineRef.current;
-    if (!e) return;
+    if (!e) return false;
+    const fade = opts.fade ?? e.hasImage;
     e.setVideo(null);
-    e.setImage(c);
+    e.setImage(c, fade);
     const pal = paletteFromImage(c, c.width, c.height);
     e.photoPalette = pal;
     setPhotoPal(pal);
     const l = lookRef.current;
-    const next = { ...l, palette: "photo", scene: sceneById(l.scene).image ? l.scene : "limitless" };
-    pushLook(next, { history: true });
+    const onPic = !!sceneById(l.scene).image;
+    pushLook({ ...l, palette: "photo", scene: onPic || !opts.jump ? l.scene : "limitless" }, { history: true });
     void name;
+    return onPic || !!opts.jump;
   }, [pushLook]);
+  const showItChip = useMemo(() => ({ label: "Show it", run: () => pushLook({ ...lookRef.current, scene: "limitless" }, { history: true }) }), [pushLook]);
 
   const useEmblem = useCallback((c: HTMLCanvasElement) => {
     const e = engineRef.current;
@@ -438,23 +462,26 @@ export default function App() {
     setImage(r);
     if (r.transparent) {
       useEmblem(r.full);
-      toast({ text: "Transparent image: placed as an emblem that rides the beat.", chips: [{ label: "Use as picture instead", run: () => { engineRef.current?.setEmblem(null); setEmblemState(null); showPicture(r.full, name); } }] });
+      toast({ text: "Transparent image: placed as an emblem that rides the beat.", chips: [{ label: "Use as picture instead", run: () => { engineRef.current?.setEmblem(null); setEmblemState(null); showPicture(r.full, name, { jump: true }); } }] });
       return;
     }
-    showPicture(r.crop, name);
+    const shown = showPicture(r.crop, name);
+    const where = shown ? "" : " · the picture plays on Limitless";
+    const show = shown ? [] : [showItChip];
     if (r.found) {
       toast({
-        text: `Album cover found · ${Math.round(r.confidence * 100)}%`,
+        text: `Album cover found · ${Math.round(r.confidence * 100)}% · colors taken${where}`,
         chips: [
+          ...show,
           { label: "Adjust", run: () => setSheet("cover") },
           { label: "Whole image", run: () => showPicture(r.full, name) },
           { label: "As emblem", run: () => useEmblem(r.crop) },
         ],
       });
     } else {
-      toast({ text: "Picture loaded. Colors taken from it.", chips: [{ label: "Pick cover", run: () => setSheet("cover") }, { label: "As emblem", run: () => useEmblem(r.full) }] });
+      toast({ text: `Colors taken from the picture${where}`, chips: [...show, { label: "Pick cover", run: () => setSheet("cover") }, { label: "As emblem", run: () => useEmblem(r.full) }] });
     }
-  }, [showPicture, useEmblem, toast]);
+  }, [showPicture, showItChip, useEmblem, toast]);
 
   // ------------------------------------------------------------------ titles and lyrics
   const captions = useMemo(() => new Captions(), []);
@@ -487,8 +514,8 @@ export default function App() {
       loadImage(t.picture).then(async (img) => {
         const r = await analyseImage(img, name, false);
         setImage(r);
-        showPicture(r.crop, name);
-        toast({ text: `Album art from ${t.title ? `“${t.title}”` : "the file"} · colors taken from it${l.length ? ` · ${l.length} lyric lines` : ""}` });
+        const shown = showPicture(r.crop, name);
+        toast({ text: `Album art from ${t.title ? `“${t.title}”` : "the file"} · colors taken from it${l.length ? ` · ${l.length} lyric lines` : ""}`, chips: shown ? undefined : [showItChip] });
       }).catch(() => {});
     } else if (l.length) toast({ text: `${l.length} synced lyric lines found in the file.` });
   };
@@ -617,29 +644,49 @@ export default function App() {
   const setFollow = useCallback((v: boolean) => { setFollowState(v); try { localStorage.setItem("afterimage.follow", v ? "1" : "0"); } catch { /* ignore */ } }, []);
   const [np, setNp] = useState<NowPlaying | null>(null);
   const npKey = useRef("");
+  const npArt = useRef("");
+  const npArtId = useRef(-1);
   useEffect(() => {
     if (!desktop || !nowPlayingAvailable || !follow) { setNp(null); return; }
     let alive = true;
+    npKey.current = ""; npArt.current = ""; npArtId.current = -1;
     desktop.nowPlaying.start();
     const iv = setInterval(async () => {
       let n: NowPlaying;
-      try { n = await desktop!.nowPlaying.get(); } catch { return; }
+      try { n = await desktop!.nowPlaying.get(npArtId.current); } catch { return; }
       if (!alive) return;
       if (!n?.playing || !n.title) return;
       // a track, video or the demo you chose yourself wins over what other apps are playing
       if (audio.kind === "track" || audio.kind === "demo" || audio.kind === "video") return;
       setNp(n);
-      if (n.key === npKey.current) return;
-      npKey.current = n.key || "";
-      setCap((c) => ({ ...c, title: n.title || "", artist: n.artist || "" }));
-      audio.trackName = n.title || "";
-      audio.trackArtist = n.artist || "";
-      setSrc((s0) => ({ ...s0, title: n.title || "", sub: [n.artist, n.app].filter(Boolean).join(" · ") }));
-      if (n.art) loadImage(n.art).then(async (img) => { const r = await analyseImage(img, n.title || "cover", false); setImage(r); showPicture(r.crop, n.title || "cover"); }).catch(() => {});
-      toast({ text: `${n.app}: ${n.title}${n.artist ? ` · ${n.artist}` : ""}`, ms: 3500 });
+      const newSong = n.key !== npKey.current;
+      // same song: only act when its cover art has just arrived
+      if (n.art) npArtId.current = n.artId ?? -1;
+      if (!newSong && (!n.art || npArt.current === n.art)) return;
+      const label = `${n.app}: ${n.title}${n.artist ? ` · ${n.artist}` : ""}`;
+      if (newSong) {
+        npKey.current = n.key || "";
+        npArt.current = "";
+        setCap((c) => ({ ...c, title: n.title || "", artist: n.artist || "" }));
+        audio.trackName = n.title || "";
+        audio.trackArtist = n.artist || "";
+        setSrc((s0) => ({ ...s0, title: n.title || "", sub: [n.artist, n.app].filter(Boolean).join(" · ") }));
+        if (!n.art) toast({ text: label, ms: 3500 });
+      }
+      if (n.art) {
+        const key = n.key || "", art = n.art;
+        npArt.current = art;
+        loadImage(art).then(async (img) => {
+          if (!alive || npKey.current !== key) return; // the song changed while the art was loading
+          const r = await analyseImage(img, n.title || "cover", false);
+          setImage(r);
+          const shown = showPicture(r.crop, n.title || "cover", { fade: true });
+          if (newSong) toast({ text: label, ms: shown ? 3500 : 6000, chips: shown ? undefined : [showItChip] });
+        }).catch(() => { if (newSong) toast({ text: label, ms: 3500 }); });
+      }
     }, 2000);
     return () => { alive = false; clearInterval(iv); desktop!.nowPlaying.stop(); };
-  }, [follow, audio, showPicture, toast]);
+  }, [follow, audio, showPicture, showItChip, toast]);
 
   // ------------------------------------------------------------------ autopilot, tempo, modulation
   const autopilot = useMemo(() => new Autopilot(), []);

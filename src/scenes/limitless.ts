@@ -18,19 +18,29 @@ vec3 placeholder(vec2 q){
   c += pal(.95)*smoothstep(.22, .0, abs(r - .28 - (m - .5)*.08))*.9;
   return c;
 }
+float gFit = 1.; // picture height as a share of the frame height
 vec2 fitUV(vec2 q){
   float r = (uRes.x/uRes.y)/uImgAspect;
   float s = mirrorMode() ? max(1., r) : min(1., r);
   float z = exp2((S(3) - .5)*2.6);
+  gFit = s*z;
   return vec2(q.x/uImgAspect, q.y)/(s*z) + .5;
 }
+// mip level that matches the picture's pixels to the screen's: sharp, no shimmer on fine text
+float baseLod(){ return max(log2(max(uImgH, 1.)/max(gFit*uRes.y, 1.)) - .35, 0.); }
 vec3 samp(vec2 uv, float l){
   if(uHasImg < .5){ return placeholder((uv - .5)*vec2(uImgAspect, 1.)); }
-  vec3 c = textureLod(uImg, uv, l).rgb;
+  vec3 c = textureLod(uImg, uv, l + baseLod()).rgb;
   if(mirrorMode()) return c;
+  // outside the cover: its own colours, deeply blurred and dimmed, with a soft shadow under the edge
   vec2 o = abs(uv - .5) - .5;
-  float e = smoothstep(-.002, .003, max(o.x, o.y));
-  if(e > 0.) c = mix(c, textureLod(uImg, (uv - .5)*.4 + .5, 6.).rgb*.4, e);
+  float px = 1./max(gFit*uRes.y, 1.);
+  float e = smoothstep(-px, px, max(o.x, o.y));
+  if(e > 0.){
+    vec3 bg = textureLod(uImg, (uv - .5)*.35 + .5, 7.).rgb*.3;
+    bg *= 1. - .6*exp(-length(max(o, 0.))*12.);
+    c = mix(c, bg, e);
+  }
   return c;
 }
 vec3 im(vec2 q){ return samp(fitUV(q), 0.); }
@@ -194,10 +204,11 @@ vec3 mVhs(vec2 q, vec2 uv){
 
 vec3 scene(vec2 p, vec2 uv){
   t = uT; B = uBass; M = uMid; H = uHigh; L = uLevel; K = uKick; Sh = S(1); C = S(2);
-  p += (vec2(fbm3(p*2. + t*.2), fbm3(p*2. - t*.2 + 7.)) - .5)*uChaos*(.12 + .2*M);
-  vec3 c;
   int m = uMode;
-  if(m == 0) c = im(p*(1. - B*.06));
+  // "none" is the plain picture, exactly like the file: no physics at all
+  if(m != 0) p += (vec2(fbm3(p*2. + t*.2), fbm3(p*2. - t*.2 + 7.)) - .5)*uChaos*(.12 + .2*M);
+  vec3 c;
+  if(m == 0) c = im(p);
   else if(m == 1) c = mFlare(p);
   else if(m == 2) c = mSmear(p);
   else if(m == 3) c = mDroste(p);
