@@ -17,7 +17,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 20, cache: npm }
       - run: npm ci && npm run build
-        env: { VITE_BUY_URL: "${{ vars.BUY_URL }}" }
+        env: { VITE_BUY_URL: "${{ vars.BUY_URL }}", VITE_PRICE: "${{ vars.PRICE }}" }
       - uses: actions/upload-pages-artifact@v3
         with: { path: dist }
       - id: deploy
