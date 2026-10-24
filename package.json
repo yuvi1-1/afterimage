@@ -2,7 +2,7 @@
   "name": "afterimage",
   "productName": "Afterimage",
   "version": "1.0.0",
-  "description": "Audio-reactive visuals from any sound, photo or album cover.",
+  "description": "Audio-reactive visuals from any song, photo or album cover. Web + desktop.",
   "author": "Yuvraj Pegu",
   "license": "UNLICENSED",
   "private": true,
@@ -70,5 +70,20 @@
     },
     "icon": "build/icon.png",
     "publish": null
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yuvi1-1/afterimage.git"
+  },
+  "homepage": "https://yuvi1-1.github.io/afterimage/",
+  "keywords": [
+    "music-visualizer",
+    "audio-reactive",
+    "webgl2",
+    "glsl",
+    "vj",
+    "electron",
+    "react",
+    "shaders"
+  ]
 }
